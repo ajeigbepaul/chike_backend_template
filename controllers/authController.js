@@ -13,6 +13,7 @@ import {
   JWT_EXPIRES_IN,
   JWT_COOKIE_EXPIRES_IN,
   NODE_ENV,
+  FRONTEND_URL,
 } from "../config/env.js";
 
 const signToken = (id) => {
@@ -47,17 +48,17 @@ const createSendToken = (user, statusCode, res) => {
 export const register = catchAsync(async (req, res, next) => {
   const { name, email, password, passwordConfirm, phone } = req.body;
 
-  // Hash password with bcryptjs
+  // Check if passwords match
   if (password !== passwordConfirm) {
     return next(new AppError("Passwords do not match", 400));
   }
-  const hashedPassword = await bcrypt.hash(password, 12);
 
+  // Create new user (password will be hashed by the User model middleware)
   const newUser = await User.create({
     name,
     email,
-    password: hashedPassword,
-    passwordConfirm: hashedPassword,
+    password,
+    passwordConfirm,
     phone,
   });
 
@@ -72,9 +73,9 @@ export const register = catchAsync(async (req, res, next) => {
   await newUser.save({ validateBeforeSave: false });
 
   // Send verification email
-  const verificationUrl = `${req.protocol}://${req.get(
-    "host"
-  )}/api/v1/auth/verify-email/${encodeURIComponent(verificationToken)}`;
+  const verificationUrl = `${FRONTEND_URL}/api/verify-email?token=${encodeURIComponent(
+    verificationToken
+  )}`;
   console.log("Verification URL:", verificationUrl);
 
   const message = `Please verify your email by clicking on this link: ${verificationUrl}`;
@@ -113,27 +114,66 @@ export const register = catchAsync(async (req, res, next) => {
 });
 
 export const login = catchAsync(async (req, res, next) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  // 1) Check if email and password exist
-  if (!email || !password) {
-    return next(new AppError("Please provide email and password!", 400));
+    // Validate input
+    if (!email || !password) {
+      return next(new AppError("Please provide both email and password", 400));
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email }).select("+password");
+    if (!user) {
+      return next(new AppError("Incorrect email or password", 401));
+    }
+
+    // Check if password matches
+    const isMatch = await user.correctPassword(password, user.password);
+    console.log("Password comparison:", {
+      provided: password,
+      stored: user.password,
+      isMatch,
+    });
+
+    if (!isMatch) {
+      return next(new AppError("Incorrect email or password", 401));
+    }
+
+    // Check if user is verified
+    if (!user.isEmailVerified) {
+      return next(
+        new AppError("Please verify your email before logging in", 401)
+      );
+    }
+
+    // Generate JWT token
+    const token = signToken(user._id);
+
+    // Set cookie options
+    const cookieOptions = {
+      expires: new Date(
+        Date.now() + JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
+      ),
+      httpOnly: true,
+      secure: NODE_ENV === "production",
+      sameSite: "strict",
+    };
+
+    // Remove password from response
+    user.password = undefined;
+
+    res.status(200).cookie("jwt", token, cookieOptions).json({
+      status: "success",
+      token,
+      data: {
+        user,
+      },
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    return next(new AppError("Error logging in", 500));
   }
-
-  // 2) Check if user exists && password is correct
-  const user = await User.findOne({ email }).select("+password");
-
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return next(new AppError("Incorrect email or password", 401));
-  }
-
-  // 3) Check if email is verified
-  if (!user.isEmailVerified) {
-    return next(new AppError("Please verify your email first", 401));
-  }
-
-  // 4) If everything ok, send token to client
-  createSendToken(user, 200, res);
 });
 
 export const verifyEmail = catchAsync(async (req, res, next) => {
@@ -167,9 +207,10 @@ export const verifyEmail = catchAsync(async (req, res, next) => {
   // 2) If token has not expired, and there is user, set the new password
   if (!user) {
     console.log("No matching user found for token");
-    return res.redirect(
-      `${process.env.FRONTEND_URL}/auth/signin?error=invalid_token`
-    );
+    return res.status(400).json({
+      status: "error",
+      message: "Invalid or expired verification token",
+    });
   }
 
   // 3) Update user's email verification status
@@ -178,8 +219,11 @@ export const verifyEmail = catchAsync(async (req, res, next) => {
   user.emailVerificationExpires = undefined;
   await user.save({ validateBeforeSave: false });
 
-  // 4) Redirect to frontend login page with success message
-  res.redirect(`${process.env.FRONTEND_URL}/auth/signin?verified=true`);
+  // 4) Return success response
+  res.status(200).json({
+    status: "success",
+    message: "Email verified successfully",
+  });
 });
 
 export const forgotPassword = catchAsync(async (req, res, next) => {

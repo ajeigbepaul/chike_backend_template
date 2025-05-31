@@ -18,4 +18,5 @@ export const {
   EMAIL_FROM_NAME,
   JWT_EXPIRES_IN,
   JWT_COOKIE_EXPIRES_IN,
+  FRONTEND_URL,
 } = process.env;
