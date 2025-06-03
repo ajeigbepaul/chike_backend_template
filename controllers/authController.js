@@ -240,22 +240,36 @@ export const forgotPassword = catchAsync(async (req, res, next) => {
   await user.save({ validateBeforeSave: false });
 
   // 3) Send it to user's email
-  const resetURL = `${req.protocol}://${req.get(
-    "host"
-  )}/api/v1/auth/reset-password/${encodeURIComponent(resetToken)}`;
+  const resetURL = `${FRONTEND_URL}/auth/reset-password/${encodeURIComponent(
+    resetToken
+  )}`;
 
-  const message = `Forgot your password? Submit a PATCH request with your new password and passwordConfirm to: ${resetURL}.\nIf you didn't forget your password, please ignore this email!`;
+  const message = `Forgot your password? Click the link below to reset your password: ${resetURL}\nIf you didn't forget your password, please ignore this email!`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 5px;">
+      <h2 style="color: #333; text-align: center;">Reset Your Password</h2>
+      <p style="color: #666; line-height: 1.6;">We received a request to reset your password. Click the button below to create a new password:</p>
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${resetURL}" style="display: inline-block; padding: 12px 24px; background: #4CAF50; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset Password</a>
+      </div>
+      <p style="color: #666; line-height: 1.6;">This link will expire in 10 minutes.</p>
+      <p style="color: #666; line-height: 1.6;">If you didn't request a password reset, you can safely ignore this email.</p>
+      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+      <p style="color: #999; font-size: 12px; text-align: center;">This is an automated message, please do not reply to this email.</p>
+    </div>
+  `;
 
   try {
     await sendEmail({
       email: user.email,
-      subject: "Your password reset token (valid for 10 min)",
+      subject: "Reset Your Password",
       message,
+      html,
     });
 
     res.status(200).json({
       status: "success",
-      message: "Token sent to email!",
+      message: "Password reset instructions sent to your email!",
     });
   } catch (err) {
     user.passwordResetToken = undefined;
@@ -291,15 +305,19 @@ export const resetPassword = catchAsync(async (req, res, next) => {
   if (req.body.password !== req.body.passwordConfirm) {
     return next(new AppError("Passwords do not match", 400));
   }
-  user.password = await bcrypt.hash(req.body.password, 12);
-  user.passwordConfirm = user.password;
+
+  // Set the new password and passwordConfirm
+  user.password = req.body.password;
+  user.passwordConfirm = req.body.passwordConfirm;
   user.passwordResetToken = undefined;
   user.passwordResetExpires = undefined;
   await user.save();
 
-  // 3) Update changedPasswordAt property for the user
-  // 4) Log the user in, send JWT
-  createSendToken(user, 200, res);
+  // 3) Return success response
+  res.status(200).json({
+    status: "success",
+    message: "Password reset successful! Please log in with your new password.",
+  });
 });
 
 export const sendOTP = catchAsync(async (req, res, next) => {

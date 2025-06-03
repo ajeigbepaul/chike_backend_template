@@ -1,40 +1,41 @@
-import mongoose from 'mongoose';
-import validator from 'validator';
-import bcrypt from 'bcryptjs';
+import mongoose from "mongoose";
+import validator from "validator";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: [true, 'Please tell us your name'],
+    required: [true, "Please tell us your name"],
     trim: true,
   },
   email: {
     type: String,
-    required: [true, 'Please provide your email'],
+    required: [true, "Please provide your email"],
     unique: true,
     lowercase: true,
-    validate: [validator.isEmail, 'Please provide a valid email'],
+    validate: [validator.isEmail, "Please provide a valid email"],
   },
   photo: String,
   role: {
     type: String,
-    enum: ['user', 'vendor', 'admin'],
-    default: 'user',
+    enum: ["user", "vendor", "admin"],
+    default: "user",
   },
   password: {
     type: String,
-    required: [true, 'Please provide a password'],
+    required: [true, "Please provide a password"],
     minlength: 8,
     select: false,
   },
   passwordConfirm: {
     type: String,
-    required: [true, 'Please confirm your password'],
+    required: [true, "Please confirm your password"],
     validate: {
       validator: function (el) {
         return el === this.password;
       },
-      message: 'Passwords are not the same',
+      message: "Passwords are not the same",
     },
   },
   passwordChangedAt: Date,
@@ -51,15 +52,15 @@ const userSchema = new mongoose.Schema({
       validator: function (v) {
         return /^\+?[1-9]\d{1,14}$/.test(v);
       },
-      message: 'Please provide a valid phone number with country code',
+      message: "Please provide a valid phone number with country code",
     },
   },
   addresses: [
     {
       type: {
         type: String,
-        enum: ['home', 'work', 'other'],
-        default: 'home',
+        enum: ["home", "work", "other"],
+        default: "home",
       },
       street: String,
       city: String,
@@ -75,7 +76,7 @@ const userSchema = new mongoose.Schema({
   wishlist: [
     {
       type: mongoose.Schema.ObjectId,
-      ref: 'Product',
+      ref: "Product",
     },
   ],
   createdAt: {
@@ -92,11 +93,15 @@ const userSchema = new mongoose.Schema({
     googleId: String,
     facebookId: String,
   },
+  vendorInvitation: {
+    token: String,
+    expiresAt: Date,
+  },
 });
 
 // Password hashing middleware
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
 
   this.password = await bcrypt.hash(this.password, 12);
   this.passwordConfirm = undefined;
@@ -104,8 +109,8 @@ userSchema.pre('save', async function (next) {
 });
 
 // Update passwordChangedAt when password is modified
-userSchema.pre('save', function (next) {
-  if (!this.isModified('password') || this.isNew) return next();
+userSchema.pre("save", function (next) {
+  if (!this.isModified("password") || this.isNew) return next();
 
   this.passwordChangedAt = Date.now() - 1000;
   next();
@@ -133,12 +138,12 @@ userSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
 
 // Instance method to create password reset token
 userSchema.methods.createPasswordResetToken = function () {
-  const resetToken = crypto.randomBytes(32).toString('hex');
+  const resetToken = crypto.randomBytes(32).toString("hex");
 
   this.passwordResetToken = crypto
-    .createHash('sha256')
+    .createHash("sha256")
     .update(resetToken)
-    .digest('hex');
+    .digest("hex");
 
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
@@ -147,17 +152,17 @@ userSchema.methods.createPasswordResetToken = function () {
 
 // Instance method to create email verification token
 userSchema.methods.createEmailVerificationToken = function () {
-  const verificationToken = crypto.randomBytes(32).toString('hex');
+  const verificationToken = crypto.randomBytes(32).toString("hex");
 
   this.emailVerificationToken = crypto
-    .createHash('sha256')
+    .createHash("sha256")
     .update(verificationToken)
-    .digest('hex');
+    .digest("hex");
 
   this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
 
   return verificationToken;
 };
 
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model("User", userSchema);
 export default User;

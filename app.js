@@ -16,7 +16,7 @@ import productRoutes from './routes/productRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
-
+import vendorRoutes from './routes/vendorRoutes.js';
 // Optionally import arcjet middleware if you want to use it here
 // import arcjetMiddleware from './middleware/arcjet.middleware.js';
 
@@ -69,6 +69,7 @@ app.use('/api/v1/products', productRoutes);
 app.use('/api/v1/orders', orderRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/reviews', reviewRoutes);
+app.use("/api/v1/vendors", vendorRoutes);
 
 // 4) ERROR HANDLING
 app.all('*', (req, res, next) => {
