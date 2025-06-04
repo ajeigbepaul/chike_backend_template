@@ -10,7 +10,7 @@ import catchAsync from "../utils/catchAsync.js";
 import { parseExcel, generateExcel } from "../utils/excelHandler.js";
 import { sendVendorInvitation } from "../services/emailService.js";
 import Order from "../models/order.model.js";
-import AppError from "../utils/appError.js";
+import AppError from "../utils/AppError.js";
 import sendEmail from "../config/email.js";
 import { Vendor, VendorInvitation } from "../models/vendor.model.js";
 
