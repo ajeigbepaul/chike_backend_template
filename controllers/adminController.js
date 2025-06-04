@@ -1,14 +1,18 @@
-import { promisify } from "util";
+// import { promisify } from "util";
 import mongoose from "mongoose";
 import crypto from "crypto";
-import Order from "../models/Order.js";
-import Product from "../models/Product.js";
-import User from "../models/User.js";
-import Review from "../models/Review.js";
-import AppError from "../utils/AppError.js";
+// import Order from "../models/Order.js";
+import Product from "../models/product.model.js";
+import User from "../models/user.model.js";
+// import Review from "../models/Review.js";
+// import AppError from "../utils/AppError.js";
 import catchAsync from "../utils/catchAsync.js";
 import { parseExcel, generateExcel } from "../utils/excelHandler.js";
 import { sendVendorInvitation } from "../services/emailService.js";
+import Order from "../models/order.model.js";
+import AppError from "../utils/appError.js";
+import sendEmail from "../config/email.js";
+import { Vendor, VendorInvitation } from "../models/vendor.model.js";
 
 // Dashboard Overview
 export const getDashboardStats = catchAsync(async (req, res, next) => {
@@ -344,55 +348,248 @@ export const updateUserRole = catchAsync(async (req, res, next) => {
   });
 });
 
-// Vendor Management
+/**
+ * Invite a vendor to join the platform (admin only)
+ */
 export const inviteVendor = catchAsync(async (req, res, next) => {
-  const { email, name } = req.body;
-
-  if (!email || !name) {
-    return next(new AppError("Please provide vendor email and name", 400));
-  }
-
+  const { email, name, phone } = req.body;
+  
   // Check if user already exists
-  let user = await User.findOne({ email });
-  if (user) {
-    if (user.role === "vendor") {
-      return next(new AppError("Vendor already exists", 400));
-    }
-    user.role = "vendor";
-    await user.save();
-  } else {
-    // Generate invitation token
-    const token = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-
-    // Create new vendor user with pending status
-    user = await User.create({
-      name,
-      email,
-      role: "vendor",
-      isEmailVerified: false,
-      vendorInvitation: {
-        token,
-        expiresAt,
-      },
-    });
+  const existingUser = await User.findOne({ email });
+  if (existingUser) {
+    return next(new AppError('A user with this email already exists', 400));
   }
-
+  
+  // Check if invitation already exists and is still valid
+  const existingInvitation = await VendorInvitation.findOne({ 
+    email, 
+    status: 'pending',
+    expiresAt: { $gt: new Date() }
+  });
+  
+  if (existingInvitation) {
+    return next(new AppError('An invitation has already been sent to this email', 400));
+  }
+  
+  // Create invitation
+  const invitation = await VendorInvitation.createInvitation(
+    { email, name, phone },
+    req.user.id
+  );
+  
+  // Generate invitation link
+  const invitationLink = `${process.env.FRONTEND_URL}/vendor/onboarding?token=${invitation.token}`;
+  
   // Send invitation email
-  await sendVendorInvitation(email, name, user.vendorInvitation.token);
-
+  await sendEmail({
+    email: email,
+    subject: 'Invitation to join our marketplace as a vendor',
+    html: `
+      <h1>Welcome to Our Marketplace!</h1>
+      <p>Dear ${name},</p>
+      <p>You have been invited to join our marketplace as a vendor.</p>
+      <p>Please click the link below to complete your registration:</p>
+      <a href="${invitationLink}" style="display: inline-block; background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Accept Invitation</a>
+      <p>This invitation will expire in 7 days.</p>
+      <p>Best regards,<br>The Marketplace Team</p>
+    `
+  });
+  
   res.status(200).json({
-    status: "success",
-    message: "Vendor invitation sent successfully",
+    success: true,
+    message: 'Vendor invitation sent successfully',
     data: {
-      vendor: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-      },
-    },
+      email,
+      name,
+      expiresAt: invitation.expiresAt
+    }
   });
 });
+
+/**
+ * Get all vendors (admin only)
+ */
+export const getAllVendors = catchAsync(async (req, res, next) => {
+  console.log('getAllVendors called with query:', req.query);
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
+  
+  // Get total count for pagination
+  const total = await Vendor.countDocuments();
+  console.log('Total vendors count:', total);
+  
+  // Get vendors with user data
+  const vendors = await Vendor.find()
+    .populate('user', 'name email phone')
+    .skip(skip)
+    .limit(limit)
+    .sort('-joinedDate');
+  
+  console.log('Found vendors:', vendors.length);
+  
+  // Format data for frontend
+  const formattedVendors = vendors.map(vendor => ({
+    id: vendor._id,
+    name: vendor.user?.name || 'Unknown',
+    email: vendor.user?.email || 'Unknown',
+    status: vendor.status,
+    products: vendor.productsCount || 0,
+    sales: vendor.totalSales || 0,
+    joinedDate: vendor.joinedDate,
+    phone: vendor.user?.phone,
+    businessName: vendor.businessName,
+    address: vendor.address
+  }));
+  
+  res.status(200).json({
+    success: true,
+    message: 'Vendors retrieved successfully',
+    data: {
+      vendors: formattedVendors,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+      }
+    }
+  });
+});
+
+/**
+ * Get vendor by ID (admin only)
+ */
+export const getVendorById = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  
+  const vendor = await Vendor.findById(id).populate('user', 'name email phone');
+  
+  if (!vendor) {
+    return next(new AppError('Vendor not found', 404));
+  }
+  
+  // Get related data
+  const productsCount = await Product.countDocuments({ vendor: id });
+  const ordersCount = await Order.countDocuments({ vendor: id });
+  
+  // Format vendor data
+  const vendorData = {
+    id: vendor._id,
+    name: vendor.user?.name || 'Unknown',
+    email: vendor.user?.email || 'Unknown',
+    phone: vendor.user?.phone,
+    status: vendor.status,
+    products: productsCount,
+    orders: ordersCount,
+    sales: vendor.totalSales || 0,
+    revenue: vendor.totalRevenue || 0,
+    joinedDate: vendor.joinedDate,
+    businessName: vendor.businessName,
+    address: vendor.address,
+    bio: vendor.bio,
+    logo: vendor.logo
+  };
+  
+  res.status(200).json({
+    success: true,
+    message: 'Vendor retrieved successfully',
+    data: vendorData
+  });
+});
+
+/**
+ * Update vendor status (admin only)
+ */
+export const updateVendorStatus = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  
+  const vendor = await Vendor.findById(id);
+  
+  if (!vendor) {
+    return next(new AppError('Vendor not found', 404));
+  }
+  
+  vendor.status = status;
+  await vendor.save();
+  
+  // Notify vendor about status change
+  const user = await User.findById(vendor.user);
+  if (user) {
+    await sendEmail({
+      email: user.email,
+      subject: `Your vendor account has been ${status === 'active' ? 'activated' : 'deactivated'}`,
+      html: `
+        <h1>Account Status Update</h1>
+        <p>Dear ${user.name},</p>
+        <p>Your vendor account has been ${status === 'active' ? 'activated' : 'deactivated'}.</p>
+        ${status === 'active' 
+          ? '<p>You can now log in and start selling your products.</p>' 
+          : '<p>You will not be able to sell products until your account is reactivated.</p>'
+        }
+        <p>If you have any questions, please contact our support team.</p>
+        <p>Best regards,<br>The Marketplace Team</p>
+      `
+    });
+  }
+  
+  res.status(200).json({
+    success: true,
+    message: `Vendor status updated to ${status} successfully`,
+    data: {
+      id: vendor._id,
+      status: vendor.status
+    }
+  });
+});
+
+/**
+ * Delete vendor (admin only)
+ */
+export const deleteVendor = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  
+  const vendor = await Vendor.findById(id);
+  
+  if (!vendor) {
+    return next(new AppError('Vendor not found', 404));
+  }
+  
+  // Get user
+  const user = await User.findById(vendor.user);
+  
+  // Delete vendor
+  await vendor.deleteOne();
+  
+  // Update user role if exists
+  if (user) {
+    user.role = 'user';
+    await user.save();
+    
+    // Notify user
+    await sendEmail({
+      email: user.email,
+      subject: 'Your vendor account has been deleted',
+      html: `
+        <h1>Account Update</h1>
+        <p>Dear ${user.name},</p>
+        <p>Your vendor account has been deleted.</p>
+        <p>You can still use your account as a regular user.</p>
+        <p>If you have any questions, please contact our support team.</p>
+        <p>Best regards,<br>The Marketplace Team</p>
+      `
+    });
+  }
+  
+  res.status(200).json({
+    success: true,
+    message: 'Vendor deleted successfully'
+  });
+});
+
+
+
 
 export const getVendorStats = catchAsync(async (req, res, next) => {
   const vendorId = req.params.id;
