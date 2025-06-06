@@ -4,7 +4,7 @@ import Product from '../models/product.model.js';
 import Order from '../models/order.model.js';
 import sendEmail from '../config/email.js';
 import catchAsync from '../utils/catchAsync.js';
-import AppError from '../utils/appError.js';
+import AppError from '../utils/AppError.js';
 
 
 
@@ -51,7 +51,8 @@ export const completeOnboarding = catchAsync(async (req, res, next) => {
     password,
     passwordConfirm: password, // Assuming User model has password confirmation
     role: 'vendor',
-    phone
+    phone,
+    isEmailVerified: true, // Assuming User model has isVerified field
   });
   
   // Create the vendor profile

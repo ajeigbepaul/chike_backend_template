@@ -4,7 +4,7 @@ import { promisify } from "util";
 // import User model
 import User from "../models/user.model.js"; // Adjust the import path as necessary
 // import User from '../models/User.js';
-import AppError from "../utils/appError.js";
+import AppError from "../utils/AppError.js";
 import catchAsync from "../utils/catchAsync.js";
 import { generateOTP, sendOTPEmail } from "../services/otpService.js";
 import sendEmail from "../config/email.js";
