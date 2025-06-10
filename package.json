@@ -32,6 +32,7 @@
     "exceljs": "^4.4.0",
     "express": "~4.16.1",
     "express-validator": "^7.2.1",
+    "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.15.1",
     "morgan": "~1.9.1",
@@ -40,6 +41,7 @@
     "nodemon": "^3.1.10",
     "pdfkit": "^0.17.1",
     "sharp": "^0.34.2",
+    "slugify": "^1.6.6",
     "tslib": "^2.8.1",
     "validator": "^13.15.15"
   },

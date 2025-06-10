@@ -17,6 +17,7 @@ import paymentRoutes from "./routes/paymentRoutes.js";
 import reviewRoutes from "./routes/reviewRoutes.js";
 import vendorRoutes from "./routes/vendorRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import categoryRoutes from "./routes/categoryRoutes.js";
 import AppError from "./utils/AppError.js";
 // Optionally import arcjet middleware if you want to use it here
 // import arcjetMiddleware from './middleware/arcjet.middleware.js';
@@ -79,6 +80,7 @@ app.use("/api/v1/payments", paymentRoutes);
 app.use("/api/v1/reviews", reviewRoutes);
 app.use("/api/v1/vendors", vendorRoutes);
 app.use("/api/v1/admin", adminRoutes);
+app.use("/api/v1/categories", categoryRoutes);
 
 // 4) ERROR HANDLING
 app.all("*", (req, res, next) => {
