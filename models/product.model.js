@@ -22,6 +22,11 @@ const productSchema = new mongoose.Schema({
     required: [true, 'A product must have a price'],
     min: [0, 'Price must be above 0'],
   },
+  priceUnit: {
+    type: String,
+    enum: ['m2', 'm3', 'piece', 'kg', 'unit', 'set', 'box', 'roll', 'liter', 'gallon', 'meter', 'cm', 'mm', 'feet', 'inch'],
+    default: 'piece',
+  },
   priceDiscount: {
     type: Number,
     validate: {
@@ -69,6 +74,22 @@ const productSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  serialNumber: {
+    type: String,
+    unique: true,
+    sparse: true, // Allows null values to not violate unique constraint
+    trim: true,
+  },
+  weight: {
+    value: { type: Number, min: 0 },
+    unit: { type: String, enum: ['kg', 'g', 'lb'], default: 'kg' }
+  },
+  dimensions: {
+    length: { type: Number, min: 0 },
+    width: { type: Number, min: 0 },
+    height: { type: Number, min: 0 },
+    unit: { type: String, enum: ['m', 'cm', 'mm', 'ft', 'in'], default: 'm' },
+  },
   brand: {
     type: mongoose.Schema.ObjectId,
     ref: 'Brand',
@@ -100,6 +121,22 @@ const productSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  variants: [{
+    attributes: [{
+      name: String,
+      value: String
+    }],
+    price: {
+      type: Number,
+      required: [true, 'A variant must have a price'],
+      min: [0, 'Price must be above 0']
+    },
+    quantity: {
+      type: Number,
+      required: [true, 'A variant must have a quantity'],
+      min: [0, 'Quantity must be above 0']
+    }
+  }],
   createdAt: {
     type: Date,
     default: Date.now,

@@ -1,11 +1,10 @@
-
 // import Product from '../models/Product.js';
 import Product from '../models/product.model.js';
 import APIFeatures from '../utils/apiFeatures.js';
 import AppError  from '../utils/AppError.js';
 import catchAsync from '../utils/catchAsync.js';
 import multer from 'multer';
-import sharp from 'sharp';
+import cloudinary from '../utils/cloudinary.js';
 
 // Configure multer for file uploads
 const multerStorage = multer.memoryStorage();
@@ -33,28 +32,37 @@ export const resizeProductImages = catchAsync(async (req, res, next) => {
 
   // 1) Cover image
   if (req.files.imageCover) {
-    req.body.imageCover = `product-${req.params.id || 'new'}-cover-${Date.now()}.jpeg`;
-    await sharp(req.files.imageCover[0].buffer)
-      .resize(2000, 1333)
-      .toFormat('jpeg')
-      .jpeg({ quality: 90 })
-      .toFile(`public/img/products/${req.body.imageCover}`);
+    const result = await cloudinary.uploader.upload(
+      `data:${req.files.imageCover[0].mimetype};base64,${req.files.imageCover[0].buffer.toString('base64')}`,
+      {
+        folder: 'chike',
+        transformation: [
+          { width: 2000, height: 1333, crop: 'fill' },
+          { quality: 'auto' },
+          { fetch_format: 'auto' }
+        ]
+      }
+    );
+    req.body.imageCover = result.secure_url;
   }
 
   // 2) Images
   if (req.files.images) {
     req.body.images = [];
     await Promise.all(
-      req.files.images.map(async (file, i) => {
-        const filename = `product-${req.params.id || 'new'}-${Date.now()}-${i + 1}.jpeg`;
-        
-        await sharp(file.buffer)
-          .resize(1000, 667)
-          .toFormat('jpeg')
-          .jpeg({ quality: 90 })
-          .toFile(`public/img/products/${filename}`);
-
-        req.body.images.push(filename);
+      req.files.images.map(async (file) => {
+        const result = await cloudinary.uploader.upload(
+          `data:${file.mimetype};base64,${file.buffer.toString('base64')}`,
+          {
+            folder: 'chike',
+            transformation: [
+              { width: 1000, height: 667, crop: 'fill' },
+              { quality: 'auto' },
+              { fetch_format: 'auto' }
+            ]
+          }
+        );
+        req.body.images.push(result.secure_url);
       })
     );
   }
@@ -67,7 +75,14 @@ export const getAllProducts = catchAsync(async (req, res, next) => {
   let filter = {};
   if (req.params.productId) filter = { product: req.params.productId };
 
-  const features = new APIFeatures(Product.find(filter), req.query)
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
+
+  // Get total count for pagination
+  const total = await Product.countDocuments(filter);
+
+  const features = new APIFeatures(Product.find(filter).populate('category', 'name'), req.query)
     .filter()
     .sort()
     .limitFields()
@@ -80,6 +95,12 @@ export const getAllProducts = catchAsync(async (req, res, next) => {
     results: products.length,
     data: {
       products
+    },
+    pagination: {
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit)
     }
   });
 });

@@ -6,6 +6,10 @@ import { Parser } from 'json2csv';
 
 export const getAllCategories = catchAsync(async (req, res, next) => {
   const categories = await Category.find()
+    .populate({
+      path: 'subcategories',
+      options: { sort: { order: 1 } }
+    })
     .sort('order');
   
   res.status(200).json({

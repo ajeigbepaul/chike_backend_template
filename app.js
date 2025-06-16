@@ -44,6 +44,27 @@ if (process.env.NODE_ENV === "development") {
 
 // Body parser, reading data from body into req.body
 app.use(express.json({ limit: "10kb" }));
+// Add after express.json() middleware
+app.use((req, res, next) => {
+  // Convert flat dimensions to object
+  if (req.body.dimensions && typeof req.body.dimensions === 'object' && !Array.isArray(req.body.dimensions)) {
+    req.body.dimensions = {
+      length: req.body.dimensions.length,
+      width: req.body.dimensions.width,
+      height: req.body.dimensions.height,
+      unit: req.body.dimensions.unit
+    };
+  }
+  
+  // Convert flat weight to object
+  if (req.body.weight && typeof req.body.weight === 'object' && !Array.isArray(req.body.weight)) {
+    req.body.weight = {
+      value: req.body.weight.value,
+      unit: req.body.weight.unit
+    };
+  }
+  next();
+});
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 app.use(cookieParser());
 
@@ -62,14 +83,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Test route
-app.get("/api/v1/test", (req, res) => {
-  res.status(200).json({
-    status: "success",
-    message: "API is working!",
-    time: req.requestTime,
-  });
-});
 
 // 3) ROUTES
 app.use("/api/v1/auth", authRoutes);
@@ -81,6 +94,16 @@ app.use("/api/v1/reviews", reviewRoutes);
 app.use("/api/v1/vendors", vendorRoutes);
 app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/categories", categoryRoutes);
+
+
+// Test route
+app.get("/api/v1/test", (req, res) => {
+  res.status(200).json({
+    status: "success",
+    message: "API is working!",
+    time: req.requestTime,
+  });
+});
 
 // 4) ERROR HANDLING
 app.all("*", (req, res, next) => {

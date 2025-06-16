@@ -3,7 +3,7 @@ import AppError  from '../utils/AppError.js';
 import catchAsync from '../utils/catchAsync.js';
 import APIFeatures from '../utils/apiFeatures.js';
 import multer from 'multer';
-import sharp from 'sharp';
+import cloudinary from '../utils/cloudinary.js';
 
 // Multer configuration for file upload
 const multerStorage = multer.memoryStorage();
@@ -26,14 +26,19 @@ export const uploadUserPhoto = upload.single('photo');
 export const resizeUserPhoto = catchAsync(async (req, res, next) => {
   if (!req.file) return next();
 
-  req.file.filename = `user-${req.user.id}-${Date.now()}.jpeg`;
+  const result = await cloudinary.uploader.upload(
+    `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`,
+    {
+      folder: 'chike',
+      transformation: [
+        { width: 500, height: 500, crop: 'fill' },
+        { quality: 'auto' },
+        { fetch_format: 'auto' }
+      ]
+    }
+  );
 
-  await sharp(req.file.buffer)
-    .resize(500, 500)
-    .toFormat('jpeg')
-    .jpeg({ quality: 90 })
-    .toFile(`public/img/users/${req.file.filename}`);
-
+  req.body.photo = result.secure_url;
   next();
 });
 
