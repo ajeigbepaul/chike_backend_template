@@ -5,7 +5,7 @@ const categorySchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'A category must have a name'],
-    unique: true,
+    // unique: true,
     trim: true,
     maxlength: [100, 'A category name must have less or equal than 100 characters'],
     minlength: [2, 'A category name must have more or equal than 2 characters']
@@ -65,6 +65,7 @@ categorySchema.index({ slug: 1 });
 categorySchema.index({ parent: 1 });
 categorySchema.index({ ancestors: 1 });
 categorySchema.index({ path: 1 });
+categorySchema.index({ name: 1, parent: 1 }, { unique: true });
 
 // Pre-save middleware to create slug
 categorySchema.pre('save', function(next) {

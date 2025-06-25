@@ -71,7 +71,6 @@ export const resizeProductImages = catchAsync(async (req, res, next) => {
 });
 
 export const getAllProducts = catchAsync(async (req, res, next) => {
-  // To allow for nested GET reviews on product
   let filter = {};
   if (req.params.productId) filter = { product: req.params.productId };
 
@@ -82,31 +81,46 @@ export const getAllProducts = catchAsync(async (req, res, next) => {
   // Get total count for pagination
   const total = await Product.countDocuments(filter);
 
-  const features = new APIFeatures(Product.find(filter).populate('category', 'name'), req.query)
-    .filter()
-    .sort()
-    .limitFields()
-    .paginate();
-
-  const products = await features.query;
+  // Use aggregation to join reviews and calculate ratings
+  const products = await Product.aggregate([
+    { $match: filter },
+    {
+      $lookup: {
+        from: 'reviews',
+        localField: '_id',
+        foreignField: 'product',
+        as: 'reviews',
+      },
+    },
+    {
+      $addFields: {
+        rating: { $avg: '$reviews.rating' },
+        reviewsCount: { $size: '$reviews' },
+      },
+    },
+    { $skip: skip },
+    { $limit: limit },
+  ]);
 
   res.status(200).json({
     status: 'success',
     results: products.length,
     data: {
-      products
+      products,
     },
     pagination: {
       total,
       page,
       limit,
-      pages: Math.ceil(total / limit)
-    }
+      pages: Math.ceil(total / limit),
+    },
   });
 });
 
 export const getProduct = catchAsync(async (req, res, next) => {
-  const product = await Product.findById(req.params.id).populate('reviews');
+  const product = await Product.findById(req.params.id)
+    .populate('reviews')
+    .populate('brand');
 
   if (!product) {
     return next(new AppError('No product found with that ID', 404));
@@ -263,5 +277,23 @@ export const getAutocompleteSuggestions = catchAsync(async (req, res, next) => {
     data: {
       suggestions
     }
+  });
+});
+
+export const getRelatedProducts = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const currentProduct = await Product.findById(id);
+  if (!currentProduct) return next(new AppError('No product found with that ID', 404));
+
+  const related = await Product.find({
+    category: currentProduct.category,
+    _id: { $ne: id }
+  })
+    .limit(8)
+    .populate('brand');
+
+  res.status(200).json({
+    status: 'success',
+    data: related
   });
 });

@@ -94,9 +94,17 @@ const orderSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled'],
+    enum: ['pending', 'in-transit', 'delivered', 'canceled', 'completed'],
     default: 'pending',
   },
+  statusHistory: [
+    {
+      status: { type: String },
+      date: { type: Date, default: Date.now },
+      changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    }
+  ],
+  currentStatusDate: { type: Date },
   trackingNumber: String,
   trackingCompany: String,
   trackingUrl: String,

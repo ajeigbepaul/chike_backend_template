@@ -7,6 +7,7 @@ import {
   getAllOrders,
   updateOrderToPaid,
   updateOrderToDelivered,
+  updateOrderStatus,
 } from '../controllers/orderController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
 
@@ -22,6 +23,7 @@ router.get('/:id/invoice', generateInvoice);
 router.use(restrictTo('admin'));
 
 router.get('/', getAllOrders);
+router.patch('/:id', updateOrderStatus);
 router.patch('/:id/pay', updateOrderToPaid);
 router.patch('/:id/deliver', updateOrderToDelivered);
 

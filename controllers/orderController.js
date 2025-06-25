@@ -4,6 +4,7 @@ import Product from '../models/product.model.js';
 import AppError  from '../utils/AppError.js';
 import catchAsync from '../utils/catchAsync.js';
 import generateInvoice from '../utils/generateInvoice.js';
+import Notification from '../models/notification.model.js';
 
 export const createOrder = catchAsync(async (req, res, next) => {
   const {
@@ -179,4 +180,33 @@ export const generateInvoiceController = catchAsync(async (req, res, next) => {
   });
 
   res.send(invoice);
+});
+
+export const updateOrderStatus = catchAsync(async (req, res, next) => {
+  const { status, date } = req.body;
+  const order = await Order.findById(req.params.id);
+  if (!order) {
+    return next(new AppError('No order found with that ID', 404));
+  }
+  // Update status and currentStatusDate
+  order.status = status;
+  order.currentStatusDate = date ? new Date(date) : new Date();
+  // Push to statusHistory
+  order.statusHistory.push({
+    status,
+    date: order.currentStatusDate,
+    changedBy: req.user._id,
+  });
+  await order.save();
+  // Create notification for user
+  await Notification.create({
+    user: order.user,
+    order: order._id,
+    status,
+    message: `Your order #${order._id} status changed to ${status}`,
+  });
+  res.status(200).json({
+    status: 'success',
+    data: { order },
+  });
 });

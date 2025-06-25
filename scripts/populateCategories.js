@@ -369,13 +369,8 @@ const categories = [
 ];
 
 async function createCategory(categoryData, parentId = null, parentPath = []) {
-  // Create a unique name by combining with parent path
-  const uniqueName = parentPath.length > 0 
-    ? `${parentPath.join(' > ')} > ${categoryData.name}`
-    : categoryData.name;
-
   const category = await Category.create({
-    name: uniqueName,
+    name: categoryData.name,
     order: categoryData.order,
     parent: parentId,
     isActive: true
