@@ -21,6 +21,8 @@ import categoryRoutes from "./routes/categoryRoutes.js";
 import wishlistRoutes from "./routes/wishlistRoutes.js";
 import AppError from "./utils/AppError.js";
 import brandRoutes from "./routes/brandRoutes.js";
+import notificationsRoutes from "./routes/notificationsRoutes.js";
+
 // Optionally import arcjet middleware if you want to use it here
 // import arcjetMiddleware from './middleware/arcjet.middleware.js';
 
@@ -98,6 +100,7 @@ app.use("/api/v1/admin", adminRoutes);
 app.use("/api/v1/categories", categoryRoutes);
 app.use("/api/v1/wishlist", wishlistRoutes);
 app.use("/api/v1/brands", brandRoutes);
+app.use("/api/v1/notifications", notificationsRoutes);
 
 
 // Test route

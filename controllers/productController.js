@@ -5,6 +5,7 @@ import AppError  from '../utils/AppError.js';
 import catchAsync from '../utils/catchAsync.js';
 import multer from 'multer';
 import cloudinary from '../utils/cloudinary.js';
+import Order from '../models/order.model.js';
 
 // Configure multer for file uploads
 const multerStorage = multer.memoryStorage();
@@ -259,14 +260,32 @@ export const getAutocompleteSuggestions = catchAsync(async (req, res, next) => {
         }
       }
     },
+    { $limit: 5 },
+    // Lookup category
     {
-      $limit: 5
+      $lookup: {
+        from: 'categories',
+        localField: 'category',
+        foreignField: '_id',
+        as: 'categoryObj'
+      }
+    },
+    // Lookup brand
+    {
+      $lookup: {
+        from: 'brands',
+        localField: 'brand',
+        foreignField: '_id',
+        as: 'brandObj'
+      }
     },
     {
       $project: {
         name: 1,
         slug: 1,
-        imageCover: 1
+        imageCover: 1,
+        category: { $arrayElemAt: ['$categoryObj.name', 0] },
+        brand: { $arrayElemAt: ['$brandObj.name', 0] }
       }
     }
   ]);
@@ -297,3 +316,34 @@ export const getRelatedProducts = catchAsync(async (req, res, next) => {
     data: related
   });
 });
+
+export const getMostOrderedProducts = async (req, res, next) => {
+  const topProducts = await Order.aggregate([
+    // Only include orderItems with valid ObjectId products
+    { $unwind: "$orderItems" },
+    { $match: { "orderItems.product": { $type: "objectId" } } },
+    { $group: {
+        _id: "$orderItems.product",
+        totalSold: { $sum: "$orderItems.quantity" }
+      }
+    },
+    { $sort: { totalSold: -1 } },
+    { $limit: 8 },
+    {
+      $lookup: {
+        from: "products",
+        localField: "_id",
+        foreignField: "_id",
+        as: "product"
+      }
+    },
+    { $unwind: "$product" },
+    {
+      $replaceRoot: { newRoot: { $mergeObjects: [ "$product", { totalSold: "$totalSold" } ] } }
+    }
+  ]);
+  res.status(200).json({
+    status: 'success',
+    data: { products: topProducts },
+  });
+};

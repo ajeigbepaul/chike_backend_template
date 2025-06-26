@@ -10,7 +10,8 @@ import {
   getAutocompleteSuggestions,
   uploadProductImages,
   resizeProductImages,
-  getRelatedProducts
+  getRelatedProducts,
+  getMostOrderedProducts
 } from '../controllers/productController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
 import reviewRouter from './reviewRoutes.js';
@@ -26,6 +27,7 @@ router.get('/search', searchProducts);
 router.get('/autocomplete', getAutocompleteSuggestions);
 router.get('/stats', getProductStats);
 router.get('/:id/related', getRelatedProducts);
+router.get('/most-ordered', getMostOrderedProducts);
 router.get('/:id', getProduct);
 
 // Protected routes (admin only)
