@@ -97,6 +97,19 @@ const userSchema = new mongoose.Schema({
     token: String,
     expiresAt: Date,
   },
+  checkoutInfo: {
+    customerAddress: {
+      name: String,
+      address: String,
+      phone: String,
+      email: String,
+    },
+    deliveryDetails: {
+      pickupStation: String,
+      deliveryDate: String,
+    },
+    paymentMethod: String,
+  },
 });
 
 // Password hashing middleware

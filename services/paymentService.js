@@ -1,5 +1,6 @@
 import axios from 'axios';
 import AppError from '../utils/AppError.js';
+import { PAYSTACK_SECRET_KEY } from '../config/env.js';
 
 // Paystack integration
 export const initializePaystackPayment = async (email, amount, reference, metadata = {}) => {
@@ -14,7 +15,7 @@ export const initializePaystackPayment = async (email, amount, reference, metada
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
           'Content-Type': 'application/json',
         },
       }
@@ -27,23 +28,19 @@ export const initializePaystackPayment = async (email, amount, reference, metada
   }
 };
 
-export const verifyPaystackPayment = async (reference) => {
+export async function verifyPaystackPayment(reference) {
   try {
-    const response = await axios.get(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        },
-      }
-    );
-
+    console.log('Verifying Paystack payment with reference:', reference);
+    const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
+      headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` }
+    });
+    console.log('Paystack verification response:', response.data);
     return response.data;
   } catch (error) {
     console.error('Paystack verification error:', error.response ? error.response.data : error.message);
     throw new AppError('Payment verification failed', 500);
   }
-};
+}
 
 // Flutterwave integration
 export const initializeFlutterwavePayment = async (email, amount, reference, metadata = {}) => {

@@ -53,13 +53,18 @@ const orderSchema = new mongoose.Schema({
   paymentMethod: {
     type: String,
     required: [true, 'Please provide payment method'],
-    enum: ['card', 'bank-transfer', 'mobile-money', 'paypal'],
+    enum: ['card', 'bank-transfer', 'mobile-money', 'paypal', 'paystack', 'flutterwave'],
   },
   paymentResult: {
     id: String,
     status: String,
     update_time: String,
     email_address: String,
+  },
+  paymentReference: {
+    type: String,
+    unique: true,
+    sparse: true, // Allow multiple null values
   },
   taxPrice: {
     type: Number,
@@ -94,7 +99,7 @@ const orderSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'in-transit', 'delivered', 'canceled', 'completed'],
+    enum: ['pending', 'processing', 'in-transit', 'delivered', 'canceled', 'completed'],
     default: 'pending',
   },
   statusHistory: [

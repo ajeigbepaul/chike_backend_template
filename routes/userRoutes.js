@@ -16,7 +16,9 @@ import {
   getAddresses,
   updateAddress,
   removeAddress,
-  setDefaultAddress
+  setDefaultAddress,
+  getCheckoutInfo,
+  updateCheckoutInfo
 } from '../controllers/userController.js';
 import {
   protect,
@@ -44,6 +46,10 @@ router.post('/addresses', addAddress);
 router.patch('/addresses/:addressId', updateAddress);
 router.delete('/addresses/:addressId', removeAddress);
 router.patch('/addresses/:addressId/set-default', setDefaultAddress);
+
+// Checkout routes
+router.get('/checkout-info', getCheckoutInfo);
+router.patch('/checkout-info', updateCheckoutInfo);
 
 // Admin-only routes
 router.use(restrictTo('admin'));

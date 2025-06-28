@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import Order from '../models/order.model.js';
 import AppError  from '../utils/AppError.js';
 import catchAsync  from '../utils/catchAsync.js';
+import { PAYSTACK_PUBLIC_KEY,PAYSTACK_SECRET_KEY } from '../config/env.js';
 import {
   initializePaystackPayment,
   verifyPaystackPayment,
@@ -18,8 +19,12 @@ export const initializePayment = catchAsync(async (req, res, next) => {
     return next(new AppError('No order found with that ID', 404));
   }
 
+  console.log('Order user:', order.user, 'Request user:', req.user._id);
+
   // 2) Check if order belongs to user
-  if (order.user.toString() !== req.user._id.toString()) {
+  if (
+    (order.user._id ? order.user._id.toString() : order.user.toString()) !== req.user._id.toString()
+  ) {
     return next(new AppError('Not authorized to pay for this order', 401));
   }
 
@@ -44,6 +49,16 @@ export const initializePayment = catchAsync(async (req, res, next) => {
         user_id: req.user._id.toString(),
       }
     );
+    // For inline, return only the reference
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        reference,
+        email: req.user.email,
+        amount: order.totalPrice,
+        publicKey:PAYSTACK_PUBLIC_KEY,
+      },
+    });
   } else if (paymentGateway === 'flutterwave') {
     paymentData = await initializeFlutterwavePayment(
       req.user.email,
@@ -71,6 +86,11 @@ export const initializePayment = catchAsync(async (req, res, next) => {
 });
 
 export const verifyPayment = catchAsync(async (req, res, next) => {
+  console.log('=== PAYMENT VERIFICATION STARTED ===');
+  console.log('Request body:', req.body);
+  console.log('User:', req.user);
+  console.log('Headers:', req.headers);
+  
   const { reference, paymentGateway } = req.body;
 
   // 1) Get the order
@@ -79,8 +99,12 @@ export const verifyPayment = catchAsync(async (req, res, next) => {
     return next(new AppError('No order found with that payment reference', 404));
   }
 
+  console.log('Order user:', order.user, 'Request user:', req.user._id);
+
   // 2) Check if order belongs to user
-  if (order.user.toString() !== req.user._id.toString()) {
+  if (
+    (order.user._id ? order.user._id.toString() : order.user.toString()) !== req.user._id.toString()
+  ) {
     return next(new AppError('Not authorized to verify this payment', 401));
   }
 
@@ -130,7 +154,7 @@ export const webhook = catchAsync(async (req, res, next) => {
   // Verify Paystack webhook
   if (req.headers['x-paystack-signature']) {
     const hash = crypto
-      .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
+      .createHmac('sha512', PAYSTACK_SECRET_KEY)
       .update(JSON.stringify(req.body))
       .digest('hex');
 

@@ -9,7 +9,7 @@ import {
   getReviewsForProduct,
   getMyReviews
 } from '../controllers/reviewController.js';
-import { protect, restrictTo } from '../controllers/authController.js';
+import { authenticate, authorize } from '../middleware/auth.middleware.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -19,27 +19,27 @@ router.get('/product/:productId', getReviewsForProduct);
 router.get('/:id', getReview);
 
 // Protected routes (require authentication)
-router.use(protect);
+router.use(authenticate);
 
 router.get('/my-reviews', getMyReviews);
 router.post(
   '/',
-  restrictTo('user'),
+  authorize(['user']),
   createReview
 );
 router.patch(
   '/:id',
-  restrictTo('user', 'admin'),
+  authorize(['user', 'admin']),
   updateReview
 );
 router.delete(
   '/:id',
-  restrictTo('user', 'admin'),
+  authorize(['user', 'admin']),
   deleteReview
 );
 router.post(
   '/:id/report',
-  restrictTo('user'),
+  authorize(['user']),
   reportReview
 );
 

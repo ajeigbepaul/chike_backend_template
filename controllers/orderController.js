@@ -168,6 +168,8 @@ export const generateInvoiceController = catchAsync(async (req, res, next) => {
     return next(new AppError('No order found with that ID', 404));
   }
 
+  
+
   if (order.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
     return next(new AppError('Not authorized to view this invoice', 401));
   }
@@ -208,5 +210,127 @@ export const updateOrderStatus = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: 'success',
     data: { order },
+  });
+});
+
+// User-accessible order update (limited actions)
+export const updateMyOrder = catchAsync(async (req, res, next) => {
+  const { action } = req.body;
+  const order = await Order.findById(req.params.id);
+  
+  if (!order) {
+    return next(new AppError('No order found with that ID', 404));
+  }
+  
+   // 2) Check if order belongs to user
+   if (
+    (order.user._id ? order.user._id.toString() : order.user.toString()) !== req.user._id.toString()
+  ) {
+    return next(new AppError('Not authorized to pay for this order', 401));
+  }
+  // Check if user owns the order
+  // if (order.user.toString() !== req.user._id.toString()) {
+  //   return next(new AppError('Not authorized to update this order', 403));
+  // }
+  
+  // Only allow specific actions based on current status
+  if (action === 'cancel') {
+    // Users can only cancel orders that are still pending
+    if (order.status !== 'pending') {
+      return next(new AppError('Can only cancel orders that are still pending', 400));
+    }
+    
+    order.status = 'canceled';
+    order.currentStatusDate = new Date();
+    
+    // Add to status history
+    order.statusHistory.push({
+      status: 'canceled',
+      date: order.currentStatusDate,
+      changedBy: req.user._id,
+    });
+    
+    // Restore product quantities
+    for (const item of order.orderItems) {
+      await Product.findByIdAndUpdate(item.product, {
+        $inc: { quantity: +item.quantity, sold: -item.quantity },
+      });
+    }
+    
+    await order.save();
+    
+    // Create notification
+    await Notification.create({
+      user: order.user,
+      order: order._id,
+      status: 'canceled',
+      message: `Your order #${order._id} has been canceled`,
+    });
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Order canceled successfully',
+      data: { order },
+    });
+  } else {
+    return next(new AppError('Invalid action. Only "cancel" is allowed', 400));
+  }
+});
+
+// Update order payment reference
+export const updateOrderPaymentReference = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id);
+  
+  if (!order) {
+    return next(new AppError('No order found with that ID', 404));
+  }
+  
+  // Check if user owns the order
+  if (
+    (order.user._id ? order.user._id.toString() : order.user.toString()) !== req.user._id.toString()
+  ) {
+    return next(new AppError('Not authorized to update this order', 403));
+  }
+  
+  // Only allow updating payment reference if order is not paid
+  if (order.isPaid) {
+    return next(new AppError('Cannot update payment reference for paid orders', 400));
+  }
+  
+  order.paymentReference = req.body.paymentReference;
+  await order.save();
+  
+  res.status(200).json({
+    status: 'success',
+    data: {
+      order,
+    },
+  });
+});
+
+export const deleteOrder = catchAsync(async (req, res, next) => {
+  const order = await Order.findById(req.params.id);
+  
+  if (!order) {
+    return next(new AppError('No order found with that ID', 404));
+  }
+  
+  // Check if user owns the order
+  if (
+    (order.user._id ? order.user._id.toString() : order.user.toString()) !== req.user._id.toString()
+  ) {
+    return next(new AppError('Not authorized to delete this order', 403));
+  }
+  
+  // Only allow deleting unpaid orders
+  if (order.isPaid) {
+    return next(new AppError('Cannot delete paid orders', 400));
+  }
+  
+  await Order.findByIdAndDelete(req.params.id);
+  
+  res.status(204).json({
+    status: 'success',
+    data: null,
   });
 });

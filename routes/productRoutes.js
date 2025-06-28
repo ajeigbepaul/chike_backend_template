@@ -13,7 +13,7 @@ import {
   getRelatedProducts,
   getMostOrderedProducts
 } from '../controllers/productController.js';
-import { protect, restrictTo } from '../controllers/authController.js';
+import { authenticate, authorize } from '../middleware/auth.middleware.js';
 import reviewRouter from './reviewRoutes.js';
 
 const router = express.Router();
@@ -31,7 +31,7 @@ router.get('/most-ordered', getMostOrderedProducts);
 router.get('/:id', getProduct);
 
 // Protected routes (admin only)
-router.use(protect, restrictTo('admin', 'vendor'));
+router.use(authenticate, authorize(['admin', 'vendor']));
 
 router.post(
   '/',

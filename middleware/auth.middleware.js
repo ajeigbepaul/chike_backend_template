@@ -26,6 +26,8 @@ const authenticate = async (req, res, next) => {
         // Verify the token
         const decoded = jwt.verify(token, JWT_SECRET);
         
+        // console.log('Decoded JWT:', decoded);
+        
         // Find the user by ID
         const user = await User.findById(decoded.id).select("-password -__v");
         if (!user) {
@@ -34,6 +36,8 @@ const authenticate = async (req, res, next) => {
                 message: "Unauthorized: User not found",
             });
         }
+
+        // console.log('User from DB:', user);
 
         // Attach user information to the request object
         req.user = user;
@@ -68,6 +72,8 @@ const authorize = (allowedRoles = []) => {
                 message: "Unauthorized: User not authenticated",
             });
         }
+        
+        // console.log('User role:', req.user.role, 'Allowed roles:', allowedRoles);
         
         // If no roles are specified or user has one of the allowed roles
         if (allowedRoles.length === 0 || allowedRoles.includes(req.user.role)) {

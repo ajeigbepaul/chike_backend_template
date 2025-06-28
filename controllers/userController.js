@@ -289,3 +289,25 @@ export const setDefaultAddress = catchAsync(async (req, res, next) => {
     }
   });
 });
+
+// Save or update checkout info for the logged-in user
+export const updateCheckoutInfo = catchAsync(async (req, res, next) => {
+  const user = await User.findByIdAndUpdate(
+    req.user._id,
+    { checkoutInfo: req.body.checkoutInfo },
+    { new: true, runValidators: true }
+  );
+  res.status(200).json({
+    status: 'success',
+    data: { checkoutInfo: user.checkoutInfo },
+  });
+});
+
+// Get checkout info for the logged-in user
+export const getCheckoutInfo = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user._id);
+  res.status(200).json({
+    status: 'success',
+    data: { checkoutInfo: user.checkoutInfo },
+  });
+});

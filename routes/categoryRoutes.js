@@ -9,7 +9,7 @@ import {
   exportCategories,
   importCategories
 } from '../controllers/categoryController.js';
-import { protect, restrictTo } from '../controllers/authController.js';
+import { authenticate, authorize } from '../middleware/auth.middleware.js';
 import multer from 'multer';
 
 const router = express.Router();
@@ -22,7 +22,7 @@ router.get('/', getAllCategories);
 router.get('/:id', getCategory);
 
 // Protected routes (admin only)
-router.use(protect, restrictTo('admin'));
+router.use(authenticate, authorize(['admin']));
 
 router.post('/', createCategory);
 router.patch('/:id', updateCategory);
