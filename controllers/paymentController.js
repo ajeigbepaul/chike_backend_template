@@ -86,10 +86,10 @@ export const initializePayment = catchAsync(async (req, res, next) => {
 });
 
 export const verifyPayment = catchAsync(async (req, res, next) => {
-  console.log('=== PAYMENT VERIFICATION STARTED ===');
-  console.log('Request body:', req.body);
-  console.log('User:', req.user);
-  console.log('Headers:', req.headers);
+  // console.log('=== PAYMENT VERIFICATION STARTED ===');
+  // console.log('Request body:', req.body);
+  // console.log('User:', req.user);
+  // console.log('Headers:', req.headers);
   
   const { reference, paymentGateway } = req.body;
 
