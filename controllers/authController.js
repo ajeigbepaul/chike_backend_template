@@ -29,6 +29,8 @@ const createSendToken = (user, statusCode, res) => {
     expires: new Date(Date.now() + JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000),
     httpOnly: true,
     secure: NODE_ENV === "production",
+    sameSite: "none",
+    path: "/",
   };
 
   res.cookie("jwt", token, cookieOptions);
@@ -157,7 +159,8 @@ export const login = catchAsync(async (req, res, next) => {
       ),
       httpOnly: true,
       secure: NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "none",
+      path: "/",
     };
 
     // Remove password from response
