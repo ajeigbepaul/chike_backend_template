@@ -22,17 +22,19 @@ const signToken = (id) => {
   });
 };
 
+const isProduction = NODE_ENV === "production";
+
+const getCookieOptions = () => ({
+  expires: new Date(Date.now() + JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000),
+  httpOnly: true,
+  secure: isProduction, // true in production, false in dev
+  sameSite: isProduction ? "none" : "lax", // "none" for cross-site in prod, "lax" for dev
+  path: "/",
+});
+
 const createSendToken = (user, statusCode, res) => {
   const token = signToken(user._id);
-
-  const cookieOptions = {
-    expires: new Date(Date.now() + JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000),
-    httpOnly: true,
-    secure: NODE_ENV === "production",
-    sameSite: "none",
-    path: "/",
-  };
-
+  const cookieOptions = getCookieOptions();
   res.cookie("jwt", token, cookieOptions);
 
   // Remove password from output
@@ -151,17 +153,7 @@ export const login = catchAsync(async (req, res, next) => {
 
     // Generate JWT token
     const token = signToken(user._id);
-
-    // Set cookie options
-    const cookieOptions = {
-      expires: new Date(
-        Date.now() + JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
-      ),
-      httpOnly: true,
-      secure: NODE_ENV === "production",
-      sameSite: "none",
-      path: "/",
-    };
+    const cookieOptions = getCookieOptions();
 
     // Remove password from response
     user.password = undefined;
