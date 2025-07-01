@@ -419,3 +419,14 @@ export const restrictTo = (...roles) => {
     next();
   };
 };
+
+// Secure session endpoint: returns current user info if authenticated
+export const getSession = [
+  protect,
+  (req, res) => {
+    res.status(200).json({
+      status: "success",
+      user: req.user,
+    });
+  },
+];
