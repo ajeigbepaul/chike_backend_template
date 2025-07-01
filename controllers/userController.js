@@ -308,6 +308,9 @@ export const getCheckoutInfo = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user._id);
   res.status(200).json({
     status: 'success',
-    data: { checkoutInfo: user.checkoutInfo },
+    data: {
+      checkoutInfo: user.checkoutInfo,
+      user: user, // return the full user object for flexibility
+    },
   });
 });
