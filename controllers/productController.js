@@ -1,31 +1,33 @@
 // import Product from '../models/Product.js';
-import Product from '../models/product.model.js';
-import APIFeatures from '../utils/apiFeatures.js';
-import AppError  from '../utils/AppError.js';
-import catchAsync from '../utils/catchAsync.js';
-import multer from 'multer';
-import cloudinary from '../utils/cloudinary.js';
-import Order from '../models/order.model.js';
+import Product from "../models/product.model.js";
+import APIFeatures from "../utils/apiFeatures.js";
+import AppError from "../utils/AppError.js";
+import catchAsync from "../utils/catchAsync.js";
+import multer from "multer";
+import cloudinary from "../utils/cloudinary.js";
+import Order from "../models/order.model.js";
+import { Vendor } from "../models/vendor.model.js";
+import crypto from "crypto";
 
 // Configure multer for file uploads
 const multerStorage = multer.memoryStorage();
 
 const multerFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image')) {
+  if (file.mimetype.startsWith("image")) {
     cb(null, true);
   } else {
-    cb(new AppError('Not an image! Please upload only images.', 400), false);
+    cb(new AppError("Not an image! Please upload only images.", 400), false);
   }
 };
 
 const upload = multer({
   storage: multerStorage,
-  fileFilter: multerFilter
+  fileFilter: multerFilter,
 });
 
 export const uploadProductImages = upload.fields([
-  { name: 'imageCover', maxCount: 1 },
-  { name: 'images', maxCount: 5 }
+  { name: "imageCover", maxCount: 1 },
+  { name: "images", maxCount: 5 },
 ]);
 
 export const resizeProductImages = catchAsync(async (req, res, next) => {
@@ -34,14 +36,16 @@ export const resizeProductImages = catchAsync(async (req, res, next) => {
   // 1) Cover image
   if (req.files.imageCover) {
     const result = await cloudinary.uploader.upload(
-      `data:${req.files.imageCover[0].mimetype};base64,${req.files.imageCover[0].buffer.toString('base64')}`,
+      `data:${
+        req.files.imageCover[0].mimetype
+      };base64,${req.files.imageCover[0].buffer.toString("base64")}`,
       {
-        folder: 'chike',
+        folder: "chike",
         transformation: [
-          { width: 2000, height: 1333, crop: 'fill' },
-          { quality: 'auto' },
-          { fetch_format: 'auto' }
-        ]
+          { width: 2000, height: 1333, crop: "fill" },
+          { quality: "auto" },
+          { fetch_format: "auto" },
+        ],
       }
     );
     req.body.imageCover = result.secure_url;
@@ -53,14 +57,14 @@ export const resizeProductImages = catchAsync(async (req, res, next) => {
     await Promise.all(
       req.files.images.map(async (file) => {
         const result = await cloudinary.uploader.upload(
-          `data:${file.mimetype};base64,${file.buffer.toString('base64')}`,
+          `data:${file.mimetype};base64,${file.buffer.toString("base64")}`,
           {
-            folder: 'chike',
+            folder: "chike",
             transformation: [
-              { width: 1000, height: 667, crop: 'fill' },
-              { quality: 'auto' },
-              { fetch_format: 'auto' }
-            ]
+              { width: 1000, height: 667, crop: "fill" },
+              { quality: "auto" },
+              { fetch_format: "auto" },
+            ],
           }
         );
         req.body.images.push(result.secure_url);
@@ -87,16 +91,25 @@ export const getAllProducts = catchAsync(async (req, res, next) => {
     { $match: filter },
     {
       $lookup: {
-        from: 'reviews',
-        localField: '_id',
-        foreignField: 'product',
-        as: 'reviews',
+        from: "reviews",
+        localField: "_id",
+        foreignField: "product",
+        as: "reviews",
+      },
+    },
+    {
+      $lookup: {
+        from: "categories",
+        localField: "category",
+        foreignField: "_id",
+        as: "categoryData",
       },
     },
     {
       $addFields: {
-        rating: { $avg: '$reviews.rating' },
-        reviewsCount: { $size: '$reviews' },
+        rating: { $avg: "$reviews.rating" },
+        reviewsCount: { $size: "$reviews" },
+        categoryName: { $arrayElemAt: ["$categoryData.name", 0] },
       },
     },
     { $skip: skip },
@@ -104,7 +117,7 @@ export const getAllProducts = catchAsync(async (req, res, next) => {
   ]);
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     results: products.length,
     data: {
       products,
@@ -120,55 +133,88 @@ export const getAllProducts = catchAsync(async (req, res, next) => {
 
 export const getProduct = catchAsync(async (req, res, next) => {
   const product = await Product.findById(req.params.id)
-    .populate('reviews')
-    .populate('brand');
+    .populate("reviews")
+    .populate("brand")
+    .populate("category");
 
   if (!product) {
-    return next(new AppError('No product found with that ID', 404));
+    return next(new AppError("No product found with that ID", 404));
   }
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      product
-    }
+      product,
+    },
   });
 });
 
+function generateSerialNumber() {
+  return "Chi" + crypto.randomBytes(5).toString("hex").toUpperCase();
+}
+
 export const createProduct = catchAsync(async (req, res, next) => {
   // Add vendor information
-  if (!req.body.vendor) req.body.vendor = req.user.id;
+  if (!req.body.vendor) {
+    // If admin, ensure they have a vendor record
+    if (req.user.role === "admin") {
+      let vendor = await Vendor.findOne({ user: req.user.id });
+      if (!vendor) {
+        vendor = await Vendor.create({
+          user: req.user.id,
+          businessName: req.user.name,
+          status: "active",
+          joinedDate: new Date(),
+        });
+      }
+      req.body.vendor = vendor._id;
+    } else {
+      req.body.vendor = req.user.id;
+    }
+  }
+
+  // Always generate a unique serialNumber
+  req.body.serialNumber = generateSerialNumber();
 
   const newProduct = await Product.create(req.body);
 
   res.status(201).json({
-    status: 'success',
+    status: "success",
     data: {
-      product: newProduct
-    }
+      product: newProduct,
+    },
   });
 });
 
 export const updateProduct = catchAsync(async (req, res, next) => {
+  // Prevent serialNumber from being updated
+  if (req.body.serialNumber) {
+    delete req.body.serialNumber;
+  }
   const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
-    runValidators: true
+    runValidators: true,
   });
 
   if (!product) {
-    return next(new AppError('No product found with that ID', 404));
+    return next(new AppError("No product found with that ID", 404));
   }
 
   // Check if the user is the vendor or admin
-  if (req.user.role !== 'admin' && product.vendor.toString() !== req.user.id.toString()) {
-    return next(new AppError('You are not authorized to update this product', 403));
+  if (
+    req.user.role !== "admin" &&
+    product.vendor.toString() !== req.user.id.toString()
+  ) {
+    return next(
+      new AppError("You are not authorized to update this product", 403)
+    );
   }
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      product
-    }
+      product,
+    },
   });
 });
 
@@ -176,47 +222,52 @@ export const deleteProduct = catchAsync(async (req, res, next) => {
   const product = await Product.findById(req.params.id);
 
   if (!product) {
-    return next(new AppError('No product found with that ID', 404));
+    return next(new AppError("No product found with that ID", 404));
   }
 
   // Check if the user is the vendor or admin
-  if (req.user.role !== 'admin' && product.vendor.toString() !== req.user.id.toString()) {
-    return next(new AppError('You are not authorized to delete this product', 403));
+  if (
+    req.user.role !== "admin" &&
+    product.vendor.toString() !== req.user.id.toString()
+  ) {
+    return next(
+      new AppError("You are not authorized to delete this product", 403)
+    );
   }
 
   await product.remove();
 
   res.status(204).json({
-    status: 'success',
-    data: null
+    status: "success",
+    data: null,
   });
 });
 
 export const getProductStats = catchAsync(async (req, res, next) => {
   const stats = await Product.aggregate([
     {
-      $match: { ratingsAverage: { $gte: 4.5 } }
+      $match: { ratingsAverage: { $gte: 4.5 } },
     },
     {
       $group: {
-        _id: '$category',
+        _id: "$category",
         numProducts: { $sum: 1 },
-        avgRating: { $avg: '$ratingsAverage' },
-        avgPrice: { $avg: '$price' },
-        minPrice: { $min: '$price' },
-        maxPrice: { $max: '$price' }
-      }
+        avgRating: { $avg: "$ratingsAverage" },
+        avgPrice: { $avg: "$price" },
+        minPrice: { $min: "$price" },
+        maxPrice: { $max: "$price" },
+      },
     },
     {
-      $sort: { avgPrice: 1 }
-    }
+      $sort: { avgPrice: 1 },
+    },
   ]);
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      stats
-    }
+      stats,
+    },
   });
 });
 
@@ -224,19 +275,19 @@ export const searchProducts = catchAsync(async (req, res, next) => {
   const { query } = req.query;
 
   if (!query) {
-    return next(new AppError('Please provide a search query', 400));
+    return next(new AppError("Please provide a search query", 400));
   }
 
   const products = await Product.find({
-    $text: { $search: query }
+    $text: { $search: query },
   }).limit(10);
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     results: products.length,
     data: {
-      products
-    }
+      products,
+    },
   });
 });
 
@@ -244,76 +295,77 @@ export const getAutocompleteSuggestions = catchAsync(async (req, res, next) => {
   const { query } = req.query;
 
   if (!query) {
-    return next(new AppError('Please provide a search query', 400));
+    return next(new AppError("Please provide a search query", 400));
   }
 
   const suggestions = await Product.aggregate([
     {
       $search: {
-        index: 'autocomplete',
+        index: "autocomplete",
         autocomplete: {
           query: query,
-          path: 'name',
+          path: "name",
           fuzzy: {
-            maxEdits: 2
-          }
-        }
-      }
+            maxEdits: 2,
+          },
+        },
+      },
     },
     { $limit: 5 },
     // Lookup category
     {
       $lookup: {
-        from: 'categories',
-        localField: 'category',
-        foreignField: '_id',
-        as: 'categoryObj'
-      }
+        from: "categories",
+        localField: "category",
+        foreignField: "_id",
+        as: "categoryObj",
+      },
     },
     // Lookup brand
     {
       $lookup: {
-        from: 'brands',
-        localField: 'brand',
-        foreignField: '_id',
-        as: 'brandObj'
-      }
+        from: "brands",
+        localField: "brand",
+        foreignField: "_id",
+        as: "brandObj",
+      },
     },
     {
       $project: {
         name: 1,
         slug: 1,
         imageCover: 1,
-        category: { $arrayElemAt: ['$categoryObj.name', 0] },
-        brand: { $arrayElemAt: ['$brandObj.name', 0] }
-      }
-    }
+        category: { $arrayElemAt: ["$categoryObj.name", 0] },
+        brand: { $arrayElemAt: ["$brandObj.name", 0] },
+      },
+    },
   ]);
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     results: suggestions.length,
     data: {
-      suggestions
-    }
+      suggestions,
+    },
   });
 });
 
 export const getRelatedProducts = catchAsync(async (req, res, next) => {
   const { id } = req.params;
   const currentProduct = await Product.findById(id);
-  if (!currentProduct) return next(new AppError('No product found with that ID', 404));
+  if (!currentProduct)
+    return next(new AppError("No product found with that ID", 404));
 
   const related = await Product.find({
     category: currentProduct.category,
-    _id: { $ne: id }
+    _id: { $ne: id },
   })
     .limit(8)
-    .populate('brand');
+    .populate("brand");
 
   res.status(200).json({
-    status: 'success',
-    data: related
+    status: "success",
+    data: related,
   });
 });
 
@@ -322,10 +374,11 @@ export const getMostOrderedProducts = async (req, res, next) => {
     // Only include orderItems with valid ObjectId products
     { $unwind: "$orderItems" },
     { $match: { "orderItems.product": { $type: "objectId" } } },
-    { $group: {
+    {
+      $group: {
         _id: "$orderItems.product",
-        totalSold: { $sum: "$orderItems.quantity" }
-      }
+        totalSold: { $sum: "$orderItems.quantity" },
+      },
     },
     { $sort: { totalSold: -1 } },
     { $limit: 8 },
@@ -334,16 +387,18 @@ export const getMostOrderedProducts = async (req, res, next) => {
         from: "products",
         localField: "_id",
         foreignField: "_id",
-        as: "product"
-      }
+        as: "product",
+      },
     },
     { $unwind: "$product" },
     {
-      $replaceRoot: { newRoot: { $mergeObjects: [ "$product", { totalSold: "$totalSold" } ] } }
-    }
+      $replaceRoot: {
+        newRoot: { $mergeObjects: ["$product", { totalSold: "$totalSold" }] },
+      },
+    },
   ]);
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: { products: topProducts },
   });
 };

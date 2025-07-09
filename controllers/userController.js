@@ -1,40 +1,40 @@
-import User from '../models/user.model.js'; // Adjust the import path as necessary
-import AppError  from '../utils/AppError.js';
-import catchAsync from '../utils/catchAsync.js';
-import APIFeatures from '../utils/apiFeatures.js';
-import multer from 'multer';
-import cloudinary from '../utils/cloudinary.js';
+import User from "../models/user.model.js"; // Adjust the import path as necessary
+import AppError from "../utils/AppError.js";
+import catchAsync from "../utils/catchAsync.js";
+import APIFeatures from "../utils/apiFeatures.js";
+import multer from "multer";
+import cloudinary from "../utils/cloudinary.js";
 
 // Multer configuration for file upload
 const multerStorage = multer.memoryStorage();
 
 const multerFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image')) {
+  if (file.mimetype.startsWith("image")) {
     cb(null, true);
   } else {
-    cb(new AppError('Not an image! Please upload only images.', 400), false);
+    cb(new AppError("Not an image! Please upload only images.", 400), false);
   }
 };
 
 const upload = multer({
   storage: multerStorage,
-  fileFilter: multerFilter
+  fileFilter: multerFilter,
 });
 
-export const uploadUserPhoto = upload.single('photo');
+export const uploadUserPhoto = upload.single("photo");
 
 export const resizeUserPhoto = catchAsync(async (req, res, next) => {
   if (!req.file) return next();
 
   const result = await cloudinary.uploader.upload(
-    `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`,
+    `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`,
     {
-      folder: 'chike',
+      folder: "chike",
       transformation: [
-        { width: 500, height: 500, crop: 'fill' },
-        { quality: 'auto' },
-        { fetch_format: 'auto' }
-      ]
+        { width: 500, height: 500, crop: "fill" },
+        { quality: "auto" },
+        { fetch_format: "auto" },
+      ],
     }
   );
 
@@ -44,7 +44,7 @@ export const resizeUserPhoto = catchAsync(async (req, res, next) => {
 
 const filterObj = (obj, ...allowedFields) => {
   const newObj = {};
-  Object.keys(obj).forEach(el => {
+  Object.keys(obj).forEach((el) => {
     if (allowedFields.includes(el)) newObj[el] = obj[el];
   });
   return newObj;
@@ -52,6 +52,13 @@ const filterObj = (obj, ...allowedFields) => {
 
 // User CRUD Operations
 export const getAllUsers = catchAsync(async (req, res, next) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
+
+  // Get total count for pagination
+  const total = await User.countDocuments();
+
   const features = new APIFeatures(User.find(), req.query)
     .filter()
     .sort()
@@ -65,6 +72,12 @@ export const getAllUsers = catchAsync(async (req, res, next) => {
     results: users.length,
     data: {
       users
+    },
+    pagination: {
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit),
     }
   });
 });
@@ -73,32 +86,32 @@ export const getUser = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.params.id);
 
   if (!user) {
-    return next(new AppError('No user found with that ID', 404));
+    return next(new AppError("No user found with that ID", 404));
   }
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      user
-    }
+      user,
+    },
   });
 });
 
 export const updateUser = catchAsync(async (req, res, next) => {
   const user = await User.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
-    runValidators: true
+    runValidators: true,
   });
 
   if (!user) {
-    return next(new AppError('No user found with that ID', 404));
+    return next(new AppError("No user found with that ID", 404));
   }
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      user
-    }
+      user,
+    },
   });
 });
 
@@ -106,12 +119,12 @@ export const deleteUser = catchAsync(async (req, res, next) => {
   const user = await User.findByIdAndDelete(req.params.id);
 
   if (!user) {
-    return next(new AppError('No user found with that ID', 404));
+    return next(new AppError("No user found with that ID", 404));
   }
 
   res.status(204).json({
-    status: 'success',
-    data: null
+    status: "success",
+    data: null,
   });
 });
 
@@ -126,27 +139,27 @@ export const updateMe = catchAsync(async (req, res, next) => {
   if (req.body.password || req.body.passwordConfirm) {
     return next(
       new AppError(
-        'This route is not for password updates. Please use /update-password.',
+        "This route is not for password updates. Please use /update-password.",
         400
       )
     );
   }
 
   // 2) Filtered out unwanted fields names that are not allowed to be updated
-  const filteredBody = filterObj(req.body, 'name', 'email', 'phone');
+  const filteredBody = filterObj(req.body, "name", "email", "phone");
   if (req.file) filteredBody.photo = req.file.filename;
 
   // 3) Update user document
   const updatedUser = await User.findByIdAndUpdate(req.user.id, filteredBody, {
     new: true,
-    runValidators: true
+    runValidators: true,
   });
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      user: updatedUser
-    }
+      user: updatedUser,
+    },
   });
 });
 
@@ -154,21 +167,21 @@ export const deleteMe = catchAsync(async (req, res, next) => {
   await User.findByIdAndUpdate(req.user.id, { active: false });
 
   res.status(204).json({
-    status: 'success',
-    data: null
+    status: "success",
+    data: null,
   });
 });
 
 // Wishlist Operations
 export const getWishlist = catchAsync(async (req, res, next) => {
-  const user = await User.findById(req.user.id).populate('wishlist');
+  const user = await User.findById(req.user.id).populate("wishlist");
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     results: user.wishlist.length,
     data: {
-      wishlist: user.wishlist
-    }
+      wishlist: user.wishlist,
+    },
   });
 });
 
@@ -177,13 +190,13 @@ export const addToWishlist = catchAsync(async (req, res, next) => {
     req.user.id,
     { $addToSet: { wishlist: req.params.productId } },
     { new: true }
-  ).populate('wishlist');
+  ).populate("wishlist");
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      wishlist: user.wishlist
-    }
+      wishlist: user.wishlist,
+    },
   });
 });
 
@@ -192,13 +205,13 @@ export const removeFromWishlist = catchAsync(async (req, res, next) => {
     req.user.id,
     { $pull: { wishlist: req.params.productId } },
     { new: true }
-  ).populate('wishlist');
+  ).populate("wishlist");
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      wishlist: user.wishlist
-    }
+      wishlist: user.wishlist,
+    },
   });
 });
 
@@ -207,11 +220,11 @@ export const getAddresses = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id);
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     results: user.addresses.length,
     data: {
-      addresses: user.addresses
-    }
+      addresses: user.addresses,
+    },
   });
 });
 
@@ -223,29 +236,29 @@ export const addAddress = catchAsync(async (req, res, next) => {
   );
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      addresses: user.addresses
-    }
+      addresses: user.addresses,
+    },
   });
 });
 
 export const updateAddress = catchAsync(async (req, res, next) => {
   const user = await User.findOneAndUpdate(
-    { _id: req.user.id, 'addresses._id': req.params.addressId },
+    { _id: req.user.id, "addresses._id": req.params.addressId },
     {
       $set: {
-        'addresses.$': req.body
-      }
+        "addresses.$": req.body,
+      },
     },
     { new: true }
   );
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      addresses: user.addresses
-    }
+      addresses: user.addresses,
+    },
   });
 });
 
@@ -257,10 +270,10 @@ export const removeAddress = catchAsync(async (req, res, next) => {
   );
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      addresses: user.addresses
-    }
+      addresses: user.addresses,
+    },
   });
 });
 
@@ -268,25 +281,25 @@ export const setDefaultAddress = catchAsync(async (req, res, next) => {
   // First reset all addresses to non-default
   await User.updateMany(
     { _id: req.user.id },
-    { $set: { 'addresses.$[].isDefault': false } }
+    { $set: { "addresses.$[].isDefault": false } }
   );
 
   // Then set the selected address as default
   const user = await User.findOneAndUpdate(
-    { _id: req.user.id, 'addresses._id': req.params.addressId },
+    { _id: req.user.id, "addresses._id": req.params.addressId },
     {
       $set: {
-        'addresses.$.isDefault': true
-      }
+        "addresses.$.isDefault": true,
+      },
     },
     { new: true }
   );
 
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
-      addresses: user.addresses
-    }
+      addresses: user.addresses,
+    },
   });
 });
 
@@ -298,7 +311,7 @@ export const updateCheckoutInfo = catchAsync(async (req, res, next) => {
     { new: true, runValidators: true }
   );
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: { checkoutInfo: user.checkoutInfo },
   });
 });
@@ -307,7 +320,7 @@ export const updateCheckoutInfo = catchAsync(async (req, res, next) => {
 export const getCheckoutInfo = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user._id);
   res.status(200).json({
-    status: 'success',
+    status: "success",
     data: {
       checkoutInfo: user.checkoutInfo,
       user: user, // return the full user object for flexibility

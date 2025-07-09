@@ -22,6 +22,8 @@ import wishlistRoutes from "./routes/wishlistRoutes.js";
 import AppError from "./utils/AppError.js";
 import brandRoutes from "./routes/brandRoutes.js";
 import notificationsRoutes from "./routes/notificationsRoutes.js";
+import advertRoutes from "./routes/advertRoutes.js";
+import promotionRoutes from "./routes/promotionRoutes.js";
 
 // Optionally import arcjet middleware if you want to use it here
 // import arcjetMiddleware from './middleware/arcjet.middleware.js';
@@ -34,7 +36,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:3000",
   "https://chike-e-frontend.vercel.app",
-  process.env.FRONTEND_URL
+  process.env.FRONTEND_URL,
 ].filter(Boolean);
 
 app.use(
@@ -63,20 +65,28 @@ app.use(express.json({ limit: "10kb" }));
 // Add after express.json() middleware
 app.use((req, res, next) => {
   // Convert flat dimensions to object
-  if (req.body.dimensions && typeof req.body.dimensions === 'object' && !Array.isArray(req.body.dimensions)) {
+  if (
+    req.body.dimensions &&
+    typeof req.body.dimensions === "object" &&
+    !Array.isArray(req.body.dimensions)
+  ) {
     req.body.dimensions = {
       length: req.body.dimensions.length,
       width: req.body.dimensions.width,
       height: req.body.dimensions.height,
-      unit: req.body.dimensions.unit
+      unit: req.body.dimensions.unit,
     };
   }
-  
+
   // Convert flat weight to object
-  if (req.body.weight && typeof req.body.weight === 'object' && !Array.isArray(req.body.weight)) {
+  if (
+    req.body.weight &&
+    typeof req.body.weight === "object" &&
+    !Array.isArray(req.body.weight)
+  ) {
     req.body.weight = {
       value: req.body.weight.value,
-      unit: req.body.weight.unit
+      unit: req.body.weight.unit,
     };
   }
   next();
@@ -99,7 +109,6 @@ app.use((req, res, next) => {
   next();
 });
 
-
 // 3) ROUTES
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
@@ -113,7 +122,8 @@ app.use("/api/v1/categories", categoryRoutes);
 app.use("/api/v1/wishlist", wishlistRoutes);
 app.use("/api/v1/brands", brandRoutes);
 app.use("/api/v1/notifications", notificationsRoutes);
-
+app.use("/api/v1/adverts", advertRoutes);
+app.use("/api/v1/promotions", promotionRoutes);
 
 // Test route
 app.get("/api/v1/test", (req, res) => {

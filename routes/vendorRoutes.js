@@ -45,8 +45,6 @@ router.post(
   vendorController.completeOnboarding
 );
 
-
-
 // Vendor-only routes
 /**
  * @route   GET /api/v1/vendors/profile
@@ -89,6 +87,14 @@ router.get(
   authenticate,
   authorize(["vendor"]),
   vendorController.getVendorStats
+);
+
+// Admin-only: Get all vendors
+router.get(
+  "/all",
+  authenticate,
+  authorize(["admin"]),
+  vendorController.getAllVendors
 );
 
 export default router;

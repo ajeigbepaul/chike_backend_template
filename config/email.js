@@ -5,11 +5,10 @@ import { EMAIL_HOST,EMAIL_PASS,EMAIL_PORT,EMAIL_SERVICE,EMAIL_USER,EMAIL_FROM,EM
 
 
 const transporter = nodemailer.createTransport({
-  service: EMAIL_SERVICE,
+  service: EMAIL_SERVICE, // Use Gmail service
   host: EMAIL_HOST,
   port: EMAIL_PORT,
-  // secure: true,
-  secure: false,
+  secure: true, // Use SSL for Gmail
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
