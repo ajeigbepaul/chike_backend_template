@@ -86,7 +86,7 @@ export const getAllProducts = catchAsync(async (req, res, next) => {
   // Get total count for pagination
   const total = await Product.countDocuments(filter);
 
-  // Use aggregation to join reviews and calculate ratings
+  // Use aggregation to join reviews, categories, and vendors
   const products = await Product.aggregate([
     { $match: filter },
     {
@@ -106,10 +106,38 @@ export const getAllProducts = catchAsync(async (req, res, next) => {
       },
     },
     {
+      $lookup: {
+        from: "vendors",
+        localField: "vendor",
+        foreignField: "user",
+        as: "vendorData",
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "vendor",
+        foreignField: "_id",
+        as: "userData",
+      },
+    },
+    {
       $addFields: {
         rating: { $avg: "$reviews.rating" },
         reviewsCount: { $size: "$reviews" },
         categoryName: { $arrayElemAt: ["$categoryData.name", 0] },
+        vendorName: {
+          $cond: {
+            if: { $gt: [{ $size: "$vendorData" }, 0] },
+            then: {
+              $ifNull: [
+                { $arrayElemAt: ["$vendorData.businessName", 0] },
+                { $arrayElemAt: ["$userData.name", 0] },
+              ],
+            },
+            else: { $arrayElemAt: ["$userData.name", 0] },
+          },
+        },
       },
     },
     { $skip: skip },
@@ -166,12 +194,36 @@ export const createProduct = catchAsync(async (req, res, next) => {
           status: "active",
           joinedDate: new Date(),
         });
+        console.log(`Created new vendor for admin: ${vendor._id}`);
       }
-      req.body.vendor = vendor._id;
+      req.body.vendor = req.user.id; // Always store user ID, not vendor ID
     } else {
       req.body.vendor = req.user.id;
     }
+  } else {
+    // If vendor is provided, ensure it's a User ID, not Vendor ID
+    const vendorDoc = await Vendor.findById(req.body.vendor);
+    if (vendorDoc) {
+      // If a Vendor ID was provided, convert it to User ID
+      const originalVendorId = req.body.vendor;
+      req.body.vendor = vendorDoc.user;
+      console.log(
+        `Converted Vendor ID ${originalVendorId} to User ID ${vendorDoc.user}`
+      );
+    } else {
+      // If no vendor document found, assume it's already a User ID
+      console.log(
+        `Vendor document not found for ID: ${req.body.vendor}, assuming it's a User ID`
+      );
+    }
   }
+
+  // Validate that vendor field is a valid User ID
+  if (!req.body.vendor) {
+    return next(new AppError("Vendor information is required", 400));
+  }
+
+  console.log(`Creating product with vendor (User ID): ${req.body.vendor}`);
 
   // Always generate a unique serialNumber
   req.body.serialNumber = generateSerialNumber();

@@ -3,6 +3,45 @@ import AppError from '../utils/AppError.js';
 import catchAsync from '../utils/catchAsync.js';
 import { validateCategoryName, validateCategoryPath, validateCategoryLevel } from '../utils/categoryValidation.js';
 import { Parser } from 'json2csv';
+import multer from "multer";
+import cloudinary from "../utils/cloudinary.js";
+
+// Configure multer for file uploads
+const multerStorage = multer.memoryStorage();
+
+const multerFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image")) {
+    cb(null, true);
+  } else {
+    cb(new AppError("Not an image! Please upload only images.", 400), false);
+  }
+};
+
+const upload = multer({
+  storage: multerStorage,
+  fileFilter: multerFilter,
+});
+
+export const uploadCategoryImage = upload.single("image");
+
+export const resizeCategoryImage = catchAsync(async (req, res, next) => {
+  if (!req.file) return next();
+
+  const result = await cloudinary.uploader.upload(
+    `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`,
+    {
+      folder: "chike-categories",
+      transformation: [
+        { width: 800, height: 600, crop: "fill" },
+        { quality: "auto" },
+        { fetch_format: "auto" },
+      ],
+    }
+  );
+
+  req.body.image = result.secure_url;
+  next();
+});
 
 export const getAllCategories = catchAsync(async (req, res, next) => {
   const categories = await Category.find()
