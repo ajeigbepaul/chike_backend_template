@@ -29,6 +29,34 @@ export const sendVendorInvitation = async (email, name, token) => {
   });
 };
 
+// Test email function to verify Gmail configuration
+export const sendTestEmail = async (email) => {
+  const subject = "Test Email - Gmail Configuration";
+  const message = `Hello,\n\nThis is a test email to verify that your Gmail configuration is working correctly.\n\nIf you receive this email, your Gmail setup is successful!\n\nBest regards,\nYour Application`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+      <h2 style="color: #333; text-align: center;">✅ Gmail Configuration Test</h2>
+      <p>Hello,</p>
+      <p>This is a test email to verify that your Gmail configuration is working correctly.</p>
+      <div style="background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; padding: 15px; margin: 20px 0;">
+        <p style="color: #155724; margin: 0; font-weight: bold;">🎉 Success! If you receive this email, your Gmail setup is working properly.</p>
+      </div>
+      <p>You can now use email functionality in your application.</p>
+      <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+      <p style="color: #666; font-size: 14px; text-align: center;">Best regards,<br>Your Application</p>
+    </div>
+  `;
+
+  await sendEmail({
+    email,
+    subject,
+    message,
+    html,
+  });
+};
+
 export default {
   sendVendorInvitation,
+  sendTestEmail,
 };
