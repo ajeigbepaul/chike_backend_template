@@ -45,6 +45,41 @@ router.post(
   vendorController.completeOnboarding
 );
 
+/**
+ * @route   POST /api/v1/vendors/direct-onboarding
+ * @desc    Complete vendor onboarding directly by user ID
+ * @access  Public
+ */
+router.post(
+  "/direct-onboarding",
+  [
+    body("userId").isString().notEmpty().withMessage("User ID is required"),
+    body("password")
+      .isLength({ min: 8 })
+      .withMessage("Password must be at least 8 characters"),
+    body("phone").notEmpty().withMessage("Phone number is required"),
+    body("address").notEmpty().withMessage("Address is required"),
+    body("bio").notEmpty().withMessage("Bio is required"),
+    validateRequest,
+  ],
+  vendorController.directOnboarding
+);
+
+/**
+ * @route   POST /api/v1/vendors/request-invite
+ * @desc    Request a vendor invitation (public)
+ * @access  Public
+ */
+router.post(
+  "/request-invite",
+  [
+    body("email").isEmail().withMessage("Valid email is required"),
+    body("name").isString().notEmpty().withMessage("Name is required"),
+    validateRequest,
+  ],
+  vendorController.requestInvite
+);
+
 // Vendor-only routes
 /**
  * @route   GET /api/v1/vendors/profile
@@ -95,6 +130,30 @@ router.get(
   authenticate,
   authorize(["admin"]),
   vendorController.getAllVendors
+);
+
+// Admin-only: Get all pending vendor invitations
+router.get(
+  "/admin/vendor-invitations",
+  authenticate,
+  authorize(["admin"]),
+  vendorController.getPendingInvitations
+);
+
+// Admin-only: Resend a pending vendor invitation
+router.post(
+  "/admin/vendor-invitations/:id/send",
+  authenticate,
+  authorize(["admin"]),
+  vendorController.resendInvitation
+);
+
+// Admin-only: Delete a pending vendor invitation
+router.delete(
+  "/admin/vendor-invitations/:id",
+  authenticate,
+  authorize(["admin"]),
+  vendorController.deleteInvitation
 );
 
 export default router;
