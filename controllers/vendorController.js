@@ -5,7 +5,7 @@ import Order from "../models/order.model.js";
 import sendEmail from "../config/email.js";
 import catchAsync from "../utils/catchAsync.js";
 import AppError from "../utils/AppError.js";
-
+import { EMAIL_FROM } from "../config/env.js";
 /**
  * Verify a vendor invitation token
  */
@@ -169,47 +169,137 @@ export const directOnboarding = catchAsync(async (req, res, next) => {
 /**
  * Handle vendor invitation requests from the public form
  */
+// export const requestInvite = catchAsync(async (req, res, next) => {
+//   const { email, name } = req.body;
+
+//   // Check if the email is already associated with a vendor
+//   const existingUser = await User.findOne({ email });
+//   if (existingUser && existingUser.role === "vendor") {
+//     const existingVendor = await Vendor.findOne({ user: existingUser._id });
+//     if (existingVendor) {
+//       return next(new AppError("This email is already associated with a vendor", 400));
+//     }
+//   }
+
+//   // Check if a pending invitation already exists for this email
+//   const existing = await VendorInvitation.findOne({ email, status: "pending" });
+//   if (existing) {
+//     return next(
+//       new AppError("An invitation has already been sent to this email.", 400)
+//     );
+//   }
+
+//   // Generate a token
+//   const token = VendorInvitation.generateInvitationToken();
+//   // Create the invitation (issuedBy is null for public requests)
+//   await VendorInvitation.create({
+//     email,
+//     name,
+//     token,
+//     status: "pending",
+//     issuedBy: null,
+//     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+//   });
+
+//   // Send an email to the admin
+//   await sendEmail({
+//     email: process.env.EMAIL_USER,
+//     subject: "New Vendor Invitation Request",
+//     html: `
+//       <h2>New Vendor Invitation Request</h2>
+//       <p><strong>Name:</strong> ${name}</p>
+//       <p><strong>Email:</strong> ${email}</p>
+//       <p>Please review and send an invitation if appropriate.</p>
+//     `,
+//   });
+
+//   res.status(200).json({
+//     success: true,
+//     message: "Your request has been received. Our team will contact you soon.",
+//   });
+// });
 export const requestInvite = catchAsync(async (req, res, next) => {
   const { email, name } = req.body;
 
-  // Check if a pending invitation already exists for this email
-  const existing = await VendorInvitation.findOne({ email, status: "pending" });
-  if (existing) {
+  // Validate input
+  if (!email || !name) {
+    return next(new AppError("Name and email are required", 400));
+  }
+
+  // Check if a pending or requested invitation already exists for this email
+  const existingInvitation = await VendorInvitation.findOne({
+    email,
+    status: { $in: ["request", "pending"] },
+  });
+  if (existingInvitation) {
     return next(
-      new AppError("An invitation has already been sent to this email.", 400)
+      new AppError(
+        `A ${existingInvitation.status} invitation already exists for this email`,
+        400
+      )
     );
   }
 
-  // Generate a token
+  // Check if the email is already associated with a vendor
+  const existingUser = await User.findOne({ email });
+  if (existingUser && existingUser.role === "vendor") {
+    const existingVendor = await Vendor.findOne({ user: existingUser._id });
+    if (existingVendor) {
+      return next(new AppError("This email is already associated with a vendor", 400));
+    }
+  }
+
+  // Generate a token (for tracking purposes)
   const token = VendorInvitation.generateInvitationToken();
-  // Create the invitation (issuedBy is null for public requests)
-  await VendorInvitation.create({
+
+  // Create the invitation request
+  const invitation = await VendorInvitation.create({
     email,
     name,
     token,
-    status: "pending",
-    issuedBy: null,
+    status: "request", // Set status to request
+    issuedBy: null, // User-initiated request
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
   });
 
-  // Send an email to the admin (for now, use EMAIL_USER as admin email)
-  await sendEmail({
-    email: process.env.EMAIL_USER,
-    subject: "New Vendor Invitation Request",
-    html: `
-      <h2>New Vendor Invitation Request</h2>
-      <p><strong>Name:</strong> ${name}</p>
-      <p><strong>Email:</strong> ${email}</p>
-      <p>Please review and send an invitation if appropriate.</p>
-    `,
-  });
+  try {
+    // Send email to the admin
+    await sendEmail({
+      email: EMAIL_FROM || "cruiselandtravelstour@gmail.com", // Admin email
+      subject: "New Vendor Invitation Request",
+      html: `
+        <h2>New Vendor Invitation Request</h2>
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p>Please review this request and send an invitation if appropriate.</p>
+        <p><a href="${
+          process.env.FRONTEND_URL || "http://localhost:3000"
+        }/admin/vendors">Go to Vendor Management</a></p>
+      `,
+    });
 
-  res.status(200).json({
-    success: true,
-    message: "Your request has been received. Our team will contact you soon.",
-  });
+    // Send confirmation email to the user
+    await sendEmail({
+      email,
+      subject: "Vendor Request Received",
+      html: `
+        <h2>Vendor Request Confirmation</h2>
+        <p>Hello ${name},</p>
+        <p>We have received your request to become a vendor. Our team will review your request and contact you soon.</p>
+        <p>Thank you,<br>The Marketplace Team</p>
+      `,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Your request has been received. Our team will contact you soon.",
+    });
+  } catch (error) {
+    // Roll back the invitation request if email sending fails
+    await VendorInvitation.deleteOne({ _id: invitation._id });
+    return next(new AppError(`Failed to send request notification: ${error.message}`, 500));
+  }
 });
-
 /**
  * Get vendor profile (vendor only)
  */
@@ -412,12 +502,25 @@ export const getAllVendors = catchAsync(async (req, res, next) => {
 /**
  * Get all pending vendor invitations (admin only)
  */
-export const getPendingInvitations = catchAsync(async (req, res, next) => {
-  const invitations = await VendorInvitation.find({ status: "pending" })
-    .select("name email status createdAt token")
-    .sort("-createdAt");
+// export const getPendingInvitations = catchAsync(async (req, res, next) => {
+//   const invitations = await VendorInvitation.find({ status: "pending" })
+//     .select("name email status createdAt token")
+//     .sort("-createdAt");
+//   res.status(200).json({
+//     success: true,
+//     data: invitations,
+//   });
+// });
+
+// New controller to fetch all invitations (request and pending)
+export const getAllInvitations = catchAsync(async (req, res, next) => {
+  const invitations = await VendorInvitation.find({
+    status: { $in: ["request", "pending"] },
+  }).select("name email status createdAt _id").sort("-createdAt");
+
   res.status(200).json({
     success: true,
+    message: "Invitations retrieved successfully",
     data: invitations,
   });
 });
@@ -460,13 +563,217 @@ export const resendInvitation = catchAsync(async (req, res, next) => {
  */
 export const deleteInvitation = catchAsync(async (req, res, next) => {
   const { id } = req.params;
-  const invitation = await VendorInvitation.findById(id);
-  if (!invitation || invitation.status !== "pending") {
-    return next(new AppError("Pending invitation not found", 404));
+
+  const invitation = await VendorInvitation.findOneAndDelete({
+    _id: id,
+    status: { $in: ["request", "pending", "active"] },
+  });
+
+  if (!invitation) {
+    return next(new AppError("No invitation found", 404));
   }
-  await invitation.deleteOne();
+
   res.status(200).json({
     success: true,
     message: "Invitation deleted successfully",
+  });
+});
+
+/**
+ * Admin: Approve a vendor request and send invitation
+ */
+export const approveVendorRequest = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  // Find the vendor request
+  const invitation = await VendorInvitation.findById(id);
+  
+  if (!invitation) {
+    return next(new AppError("Vendor request not found", 404));
+  }
+
+  if (invitation.status !== 'request') {
+    return next(new AppError("Only requests can be approved", 400));
+  }
+
+  // Check if the user is already a registered vendor
+  const existingUser = await User.findOne({ email: invitation.email });
+  if (existingUser && existingUser.role === 'vendor') {
+    const existingVendor = await Vendor.findOne({ user: existingUser._id });
+    if (existingVendor) {
+      return next(new AppError("This email is already associated with a vendor", 400));
+    }
+  }
+
+  // Update the invitation to pending status
+  invitation.status = 'pending';
+  invitation.issuedBy = req.user._id;
+  invitation.token = VendorInvitation.generateInvitationToken();
+  invitation.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await invitation.save();
+
+  // Send invitation email
+  await sendEmail({
+    email: invitation.email,
+    subject: "You are invited to become a vendor!",
+    html: `
+      <h2>Vendor Invitation Approved</h2>
+      <p>Hello ${invitation.name},</p>
+      <p>Great news! Your request to become a vendor has been approved.</p>
+      <p>Click the link below to complete your onboarding:</p>
+      <p><a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/vendor/onboarding?token=${invitation.token}">Complete Vendor Setup</a></p>
+      <p>This invitation will expire in 7 days.</p>
+      <p>Welcome to our marketplace!</p>
+    `,
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Vendor request approved and invitation sent successfully",
+    data: {
+      id: invitation._id,
+      email: invitation.email,
+      name: invitation.name,
+      status: invitation.status,
+      createdAt: invitation.createdAt,
+    },
+  });
+});
+
+/**
+ * Admin: Send a vendor invitation directly (for new emails)
+ */
+export const inviteVendor = catchAsync(async (req, res, next) => {
+  const { email, name } = req.body;
+
+  if (!email || !name) {
+    return next(new AppError("Name and email are required", 400));
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Check if any invitation already exists for this email
+  const existingInvitation = await VendorInvitation.findOne({ email: normalizedEmail });
+  if (existingInvitation) {
+    return next(new AppError(`An invitation already exists for this email with status: ${existingInvitation.status}`, 400));
+  }
+
+  // Check if the user is already a registered vendor
+  const existingUser = await User.findOne({ email: normalizedEmail });
+  if (existingUser && existingUser.role === 'vendor') {
+    const existingVendor = await Vendor.findOne({ user: existingUser._id });
+    if (existingVendor) {
+      return next(new AppError("This email is already associated with a vendor", 400));
+    }
+  }
+
+  // Create new invitation
+  const invitation = await VendorInvitation.create({
+    email: normalizedEmail,
+    name,
+    token: VendorInvitation.generateInvitationToken(),
+    status: 'pending',
+    issuedBy: req.user._id,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  });
+
+  // Send invitation email
+  await sendEmail({
+    email: normalizedEmail,
+    subject: "You are invited to become a vendor!",
+    html: `
+      <h2>Vendor Invitation</h2>
+      <p>Hello ${invitation.name},</p>
+      <p>You have been invited to become a vendor on our marketplace.</p>
+      <p>Click the link below to complete your onboarding:</p>
+      <p><a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/vendor/onboarding?token=${invitation.token}">Accept Invitation</a></p>
+      <p>This invitation will expire in 7 days.</p>
+    `,
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Invitation sent successfully",
+    data: {
+      id: invitation._id,
+      email: invitation.email,
+      name: invitation.name,
+      status: invitation.status,
+      createdAt: invitation.createdAt,
+    },
+  });
+});
+
+/**
+ * Admin: Get vendor by ID
+ */
+export const getVendorById = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  const vendor = await Vendor.findById(id).populate('user', 'name email phone');
+  
+  if (!vendor) {
+    return next(new AppError('Vendor not found', 404));
+  }
+
+  // Get vendor stats
+  const productsCount = await Product.countDocuments({ vendor: vendor._id });
+  const totalOrders = await Order.countDocuments({ vendor: vendor._id });
+  const totalRevenue = await Order.aggregate([
+    { $match: { vendor: vendor._id, status: 'completed' } },
+    { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+  ]);
+
+  res.status(200).json({
+    success: true,
+    message: 'Vendor retrieved successfully',
+    data: {
+      id: vendor._id,
+      name: vendor.user?.name || 'N/A',
+      email: vendor.user?.email || 'N/A',
+      phone: vendor.user?.phone || 'N/A',
+      businessName: vendor.businessName,
+      address: vendor.address,
+      bio: vendor.bio,
+      status: vendor.status,
+      joinedDate: vendor.joinedDate,
+      productsCount,
+      totalOrders,
+      totalRevenue: totalRevenue[0]?.total || 0,
+      createdAt: vendor.createdAt,
+      updatedAt: vendor.updatedAt
+    },
+  });
+});
+
+/**
+ * Admin: Delete vendor
+ */
+export const deleteVendor = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  const vendor = await Vendor.findById(id).populate('user');
+  
+  if (!vendor) {
+    return next(new AppError('Vendor not found', 404));
+  }
+
+  // Check if vendor has active products or orders
+  const productsCount = await Product.countDocuments({ vendor: vendor._id });
+  const ordersCount = await Order.countDocuments({ vendor: vendor._id, status: { $in: ['pending', 'processing'] } });
+
+  if (productsCount > 0 || ordersCount > 0) {
+    return next(new AppError('Cannot delete vendor with active products or pending orders. Please deactivate instead.', 400));
+  }
+
+  // Delete the vendor and associated user
+  await Vendor.findByIdAndDelete(id);
+  if (vendor.user) {
+    await User.findByIdAndDelete(vendor.user._id);
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Vendor deleted successfully',
   });
 });

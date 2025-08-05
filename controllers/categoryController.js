@@ -75,6 +75,25 @@ export const getCategory = catchAsync(async (req, res, next) => {
   });
 });
 
+export const getCategoryBySlug = catchAsync(async (req, res, next) => {
+  const category = await Category.findOne({ slug: req.params.slug })
+    .populate({
+      path: 'subcategories',
+      options: { sort: { order: 1 } }
+    });
+
+  if (!category) {
+    return next(new AppError('No category found with that slug', 404));
+  }
+
+  res.status(200).json({
+    status: 'success',
+    data: {
+      category
+    }
+  });
+});
+
 export const createCategory = catchAsync(async (req, res, next) => {
   const { name, parent, order } = req.body;
 

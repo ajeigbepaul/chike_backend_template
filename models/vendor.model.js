@@ -37,8 +37,8 @@ const vendorInvitationSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "accepted", "expired"],
-      default: "pending",
+      enum: ["request", "pending", "accepted", "rejected"],
+      default: "request",
     },
     issuedBy: {
       type: Schema.Types.ObjectId,

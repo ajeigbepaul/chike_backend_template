@@ -32,7 +32,7 @@ export const getDashboardStats = catchAsync(async (req, res, next) => {
     lowStockProducts,
     totalOrders,
     totalRevenue,
-    activeUsers,
+totalUsers,
     newSignups,
     abandonedCarts,
   ] = await Promise.all([
@@ -75,10 +75,8 @@ export const getDashboardStats = catchAsync(async (req, res, next) => {
       },
     ]),
 
-    // Active users (ordered in last 30 days)
-    Order.distinct("user", {
-      createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-    }),
+    // Total users
+    User.countDocuments(),
 
     // New signups (last 7 days)
     User.countDocuments({
@@ -170,7 +168,7 @@ export const getDashboardStats = catchAsync(async (req, res, next) => {
       pendingOrders,
       lowStockProducts,
       totalOrders: totalOrders[0] || { count: 0, revenue: 0 },
-      activeUsers: activeUsers.length,
+totalUsers: totalUsers,
       salesByRegion,
       topProducts,
       newSignups,

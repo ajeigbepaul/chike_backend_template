@@ -78,7 +78,6 @@ export const resizeProductImages = catchAsync(async (req, res, next) => {
 export const getAllProducts = catchAsync(async (req, res, next) => {
   let filter = {};
   if (req.params.productId) filter = { product: req.params.productId };
-
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
   const skip = (page - 1) * limit;
@@ -163,7 +162,11 @@ export const getProduct = catchAsync(async (req, res, next) => {
   const product = await Product.findById(req.params.id)
     .populate("reviews")
     .populate("brand")
-    .populate("category");
+    .populate("category")
+    .populate({
+      path: "accessories.products",
+      model: "Product",
+    });
 
   if (!product) {
     return next(new AppError("No product found with that ID", 404));
@@ -230,10 +233,16 @@ export const createProduct = catchAsync(async (req, res, next) => {
 
   const newProduct = await Product.create(req.body);
 
+  // Populate accessories.products for the newly created product
+  const populatedProduct = await Product.findById(newProduct._id).populate({
+    path: "accessories.products",
+    model: "Product",
+  });
+
   res.status(201).json({
     status: "success",
     data: {
-      product: newProduct,
+      product: populatedProduct,
     },
   });
 });
@@ -246,6 +255,9 @@ export const updateProduct = catchAsync(async (req, res, next) => {
   const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
     runValidators: true,
+  }).populate({
+    path: "accessories.products",
+    model: "Product",
   });
 
   if (!product) {

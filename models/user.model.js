@@ -49,10 +49,12 @@ const userSchema = new mongoose.Schema({
   phone: {
     type: String,
     validate: {
+
       validator: function (v) {
-        return /^\+?[1-9]\d{1,14}$/.test(v);
+        // Nigerian phone number format: 11 digits, starts with 0
+        return /^0\d{10}$/.test(v);
       },
-      message: "Please provide a valid phone number with country code",
+      message: "Please provide a valid 11-digit phone number starting with 0",
     },
   },
   addresses: [

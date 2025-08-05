@@ -2,6 +2,7 @@ import express from "express";
 import {
   getAllCategories,
   getCategory,
+  getCategoryBySlug,
   createCategory,
   updateCategory,
   deleteCategory,
@@ -21,6 +22,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // Public routes
 router.get("/", getAllCategories);
+router.get("/slug/:slug", getCategoryBySlug);
 router.get("/:id", getCategory);
 
 // Protected routes (admin only)

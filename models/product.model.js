@@ -5,7 +5,7 @@ const productSchema = new mongoose.Schema({
     required: [true, 'A product must have a name'],
     trim: true,
     maxlength: [100, 'A product name must have less or equal than 100 characters'],
-    minlength: [10, 'A product name must have more or equal than 10 characters'],
+    minlength: [5, 'A product name must have more or equal than 10 characters'],
   },
   slug: String,
   description: {
@@ -137,6 +137,12 @@ const productSchema = new mongoose.Schema({
       min: [0, 'Quantity must be above 0']
     }
   }],
+  accessories: [
+  {
+    name: { type: String, required: true },
+    products: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }]
+  }
+  ],
   createdAt: {
     type: Date,
     default: Date.now,

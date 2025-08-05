@@ -94,6 +94,22 @@ router.get(
 );
 
 /**
+ * @route   POST /api/v1/vendors/invite
+ * @desc    Invite a vendor
+ * @access  Admin only
+ */
+router.post(
+  "/invite",
+  authenticate,
+  authorize(["admin"]),
+  vendorController.inviteVendor
+);
+
+// router
+//   .route("/vendors/invite")
+//   .post(protect, restrictTo("admin"), inviteVendor);
+
+/**
  * @route   PUT /api/v1/vendors/profile
  * @desc    Update vendor profile
  * @access  Vendor only
@@ -137,7 +153,7 @@ router.get(
   "/admin/vendor-invitations",
   authenticate,
   authorize(["admin"]),
-  vendorController.getPendingInvitations
+  vendorController.getAllInvitations
 );
 
 // Admin-only: Resend a pending vendor invitation
@@ -154,6 +170,42 @@ router.delete(
   authenticate,
   authorize(["admin"]),
   vendorController.deleteInvitation
+);
+
+// Admin-only: Approve a vendor request
+router.patch(
+  "/admin/vendor-requests/:id/approve",
+  authenticate,
+  authorize(["admin"]),
+  [
+    param("id").isMongoId().withMessage("Valid invitation ID is required"),
+    validateRequest,
+  ],
+  vendorController.approveVendorRequest
+);
+
+// Admin-only: Get vendor by ID
+router.get(
+  "/admin/:id",
+  authenticate,
+  authorize(["admin"]),
+  [
+    param("id").isMongoId().withMessage("Valid vendor ID is required"),
+    validateRequest,
+  ],
+  vendorController.getVendorById
+);
+
+// Admin-only: Delete vendor
+router.delete(
+  "/admin/:id",
+  authenticate,
+  authorize(["admin"]),
+  [
+    param("id").isMongoId().withMessage("Valid vendor ID is required"),
+    validateRequest,
+  ],
+  vendorController.deleteVendor
 );
 
 export default router;
