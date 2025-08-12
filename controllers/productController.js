@@ -362,7 +362,8 @@ export const getAutocompleteSuggestions = catchAsync(async (req, res, next) => {
     return next(new AppError("Please provide a search query", 400));
   }
 
-  const suggestions = await Product.aggregate([
+  // Search for product suggestions
+  const productSuggestions = await Product.aggregate([
     {
       $search: {
         index: "autocomplete",
@@ -401,15 +402,126 @@ export const getAutocompleteSuggestions = catchAsync(async (req, res, next) => {
         imageCover: 1,
         category: { $arrayElemAt: ["$categoryObj.name", 0] },
         brand: { $arrayElemAt: ["$brandObj.name", 0] },
+        type: { $literal: "product" },
       },
     },
   ]);
 
+  // Search for tag suggestions
+  const tagSuggestions = await Product.aggregate([
+    { $unwind: "$tags" },
+    {
+      $match: {
+        tags: { $regex: query, $options: "i" },
+      },
+    },
+    {
+      $group: {
+        _id: "$tags",
+        count: { $sum: 1 },
+      },
+    },
+    { $sort: { count: -1 } },
+    { $limit: 3 },
+    {
+      $project: {
+        name: "$_id",
+        slug: { $concat: ["tag-", "$_id"] },
+        imageCover: null,
+        category: "Tag",
+        brand: null,
+        type: { $literal: "tag" },
+        count: 1,
+        _id: 0,
+      },
+    },
+  ]);
+
+  // Combine product and tag suggestions
+  const allSuggestions = [...productSuggestions, ...tagSuggestions];
+
   res.status(200).json({
     status: "success",
-    results: suggestions.length,
+    results: allSuggestions.length,
     data: {
-      suggestions,
+      suggestions: allSuggestions,
+    },
+  });
+});
+
+export const getProductsByTag = catchAsync(async (req, res, next) => {
+  const { tag } = req.params;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 20;
+  const skip = (page - 1) * limit;
+
+  if (!tag) {
+    return next(new AppError("Please provide a tag", 400));
+  }
+
+  // Get total count for pagination
+  const total = await Product.countDocuments({
+    tags: { $in: [tag.toLowerCase()] },
+    isActive: true,
+  });
+
+  // Find products with the specified tag
+  const products = await Product.aggregate([
+    {
+      $match: {
+        tags: { $in: [tag.toLowerCase()] },
+        isActive: true,
+      },
+    },
+    {
+      $lookup: {
+        from: "reviews",
+        localField: "_id",
+        foreignField: "product",
+        as: "reviews",
+      },
+    },
+    {
+      $lookup: {
+        from: "categories",
+        localField: "category",
+        foreignField: "_id",
+        as: "categoryData",
+      },
+    },
+    {
+      $lookup: {
+        from: "brands",
+        localField: "brand",
+        foreignField: "_id",
+        as: "brandData",
+      },
+    },
+    {
+      $addFields: {
+        rating: { $avg: "$reviews.rating" },
+        reviewsCount: { $size: "$reviews" },
+        categoryName: { $arrayElemAt: ["$categoryData.name", 0] },
+        brandName: { $arrayElemAt: ["$brandData.name", 0] },
+      },
+    },
+    { $skip: skip },
+    { $limit: limit },
+  ]);
+
+  const pages = Math.ceil(total / limit);
+
+  res.status(200).json({
+    status: "success",
+    results: products.length,
+    data: {
+      products,
+    },
+    pagination: {
+      total,
+      page,
+      limit,
+      pages,
     },
   });
 });
