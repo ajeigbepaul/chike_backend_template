@@ -136,6 +136,12 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    moq: {
+      type: Number,
+      default: 1,
+      min: [1, "Minimum order quantity must be at least 1"],
+      required: [true, "A product must have a minimum order quantity"],
+    },
     minBulkQuantity: {
       type: Number,
       default: 10,

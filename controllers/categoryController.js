@@ -100,6 +100,13 @@ export const createCategory = catchAsync(async (req, res, next) => {
   // Validate category name
   validateCategoryName(name);
 
+  // Generate fixedNumber for main categories
+  if (!parent) {
+    const lastCategory = await Category.findOne().sort({ fixedNumber: -1 });
+    const nextNumber = (lastCategory?.fixedNumber || 0) + 1;
+    req.body.fixedNumber = nextNumber;
+  }
+
   // If parent is provided, validate level
   if (parent) {
     const parentCategory = await Category.findById(parent);

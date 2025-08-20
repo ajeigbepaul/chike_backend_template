@@ -5,6 +5,8 @@ import AppError  from '../utils/AppError.js';
 import catchAsync from '../utils/catchAsync.js';
 import generateInvoice from '../utils/generateInvoice.js';
 import Notification from '../models/notification.model.js';
+import Category from '../models/category.model.js';
+import { generateOrderId } from '../utils/generateOrderId.js';
 
 export const createOrder = catchAsync(async (req, res, next) => {
   const {
@@ -42,8 +44,18 @@ export const createOrder = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Get the category of the first product for order ID generation
+  const firstProduct = await Product.findById(orderItems[0].product);
+  if (!firstProduct) {
+    return next(new AppError('Product not found', 404));
+  }
+
+  // Generate unique order ID
+  const orderId = await generateOrderId(firstProduct.category, Category);
+
   // 3) Create order
   const order = new Order({
+    orderId,
     user: req.user._id,
     orderItems,
     shippingAddress,

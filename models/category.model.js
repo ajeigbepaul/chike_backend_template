@@ -57,6 +57,11 @@ const categorySchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    fixedNumber: {
+      type: Number,
+      unique: true,
+      sparse: true,
+    },
   },
   {
     toJSON: { virtuals: true },

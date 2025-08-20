@@ -10,7 +10,7 @@ const promotionSchema = new mongoose.Schema({
   type: {
     type: String,
     required: [true, 'A promotion must have a type'],
-    enum: ['percentage', 'fixed_amount', 'buy_x_get_y'],
+    enum: ['percentage', 'fixed_amount'],
   },
   value: {
     type: Number,
@@ -37,7 +37,7 @@ const promotionSchema = new mongoose.Schema({
   },
   applicableTo: {
     type: String,
-    enum: ['all_products', 'specific_products', 'specific_categories'],
+    enum: ['all_products'],
     default: 'all_products',
   },
   products: [
@@ -56,10 +56,10 @@ const promotionSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  maximumDiscountAmount: {
-    type: Number,
-    default: null,
-  },
+  // maximumDiscountAmount: {
+  //   type: Number,
+  //   default: null,
+  // },
   usageLimit: {
     type: Number,
     default: null,
