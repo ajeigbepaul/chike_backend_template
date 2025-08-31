@@ -31,8 +31,7 @@ export const getDashboardStats = catchAsync(async (req, res, next) => {
     pendingOrders,
     lowStockProducts,
     totalOrders,
-    totalRevenue,
-totalUsers,
+    totalUsers,
     newSignups,
     abandonedCarts,
   ] = await Promise.all([
@@ -75,8 +74,8 @@ totalUsers,
       },
     ]),
 
-    // Total users
-    User.countDocuments(),
+    // Total users (role: user)
+    User.countDocuments({ role: "user" }),
 
     // New signups (last 7 days)
     User.countDocuments({
@@ -168,7 +167,7 @@ totalUsers,
       pendingOrders,
       lowStockProducts,
       totalOrders: totalOrders[0] || { count: 0, revenue: 0 },
-totalUsers: totalUsers,
+      totalUsers: totalUsers,
       salesByRegion,
       topProducts,
       newSignups,
