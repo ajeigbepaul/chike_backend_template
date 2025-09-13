@@ -245,7 +245,9 @@ export const requestInvite = catchAsync(async (req, res, next) => {
   if (existingUser && existingUser.role === "vendor") {
     const existingVendor = await Vendor.findOne({ user: existingUser._id });
     if (existingVendor) {
-      return next(new AppError("This email is already associated with a vendor", 400));
+      return next(
+        new AppError("This email is already associated with a vendor", 400)
+      );
     }
   }
 
@@ -292,12 +294,15 @@ export const requestInvite = catchAsync(async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: "Your request has been received. Our team will contact you soon.",
+      message:
+        "Your request has been received. Our team will contact you soon.",
     });
   } catch (error) {
     // Roll back the invitation request if email sending fails
     await VendorInvitation.deleteOne({ _id: invitation._id });
-    return next(new AppError(`Failed to send request notification: ${error.message}`, 500));
+    return next(
+      new AppError(`Failed to send request notification: ${error.message}`, 500)
+    );
   }
 });
 /**
@@ -385,76 +390,100 @@ export const getVendorStats = catchAsync(async (req, res, next) => {
     return next(new AppError("Vendor profile not found", 404));
   }
 
-  // Update stats to ensure they're current
-  await vendor.updateStats();
+  // Update stats to ensure they're current (if supported by model)
+  if (typeof vendor.updateStats === "function") {
+    await vendor.updateStats();
+  }
+
+  // Compute products owned by this vendor (product.vendor references User)
+  const vendorUserId = vendor.user;
+  const vendorProducts = await Product.find({ vendor: vendorUserId }).select(
+    "_id name price quantity status category createdAt sold"
+  );
+  const productIds = vendorProducts.map((p) => p._id);
 
   // Get more detailed stats
-  const productsCount = vendor.productsCount || 0;
-  const totalOrders = vendor.ordersCount || 0;
-  const totalSales = vendor.totalSales || 0;
-  const totalRevenue = vendor.totalRevenue || 0;
+  const productsCount = productIds.length;
+  const totalOrders = vendor.ordersCount || 0; // updated in updateStats
+  const totalSales = vendor.totalSales || 0; // updated in updateStats
+  const totalRevenue = vendor.totalRevenue || 0; // updated in updateStats
 
   // Get low stock products (less than 5 in stock)
   const lowStockProducts = await Product.countDocuments({
-    vendor: vendor._id,
-    stock: { $lt: 5, $gt: 0 },
+    vendor: vendorUserId,
+    quantity: { $lt: 5, $gt: 0 },
   });
 
-  // Get pending orders
+  // Get pending orders that include this vendor's products
   const pendingOrders = await Order.countDocuments({
-    vendor: vendor._id,
+    "orderItems.product": { $in: productIds },
     status: "pending",
   });
 
-  // Get recent orders
-  const recentOrders = await Order.find({ vendor: vendor._id })
+  // Get recent orders containing this vendor's products
+  const recentOrders = await Order.find({
+    "orderItems.product": { $in: productIds },
+  })
     .sort("-createdAt")
     .limit(5)
     .populate("user", "name email");
 
-  // Format recent orders
-  const formattedOrders = recentOrders.map((order) => ({
-    id: order._id,
-    customer: {
-      name: order.user?.name || "Guest",
-      email: order.user?.email || "N/A",
-    },
-    orderDate: order.createdAt,
-    status: order.status,
-    total: order.totalAmount,
-    items: order.items?.length || 0,
-  }));
+  // Format recent orders (compute total for this vendor's items only)
+  const formattedOrders = recentOrders.map((order) => {
+    const vendorItems =
+      order.orderItems?.filter((it) =>
+        productIds.some((id) => id.equals(it.product?._id || it.product))
+      ) || [];
+    const vendorTotal = vendorItems.reduce(
+      (sum, it) => sum + (it.price || 0) * (it.quantity || 0),
+      0
+    );
+    return {
+      id: order._id,
+      customer: {
+        name: order.user?.name || "Guest",
+        email: order.user?.email || "N/A",
+      },
+      orderDate: order.createdAt,
+      status: order.status,
+      total: vendorTotal,
+      items: vendorItems.length,
+    };
+  });
 
-  // Get popular products
-  const popularProducts = await Product.find({ vendor: vendor._id })
-    .sort("-sales")
-    .limit(5);
+  // Get popular products (by sold count)
+  const popularProducts = await Product.find({ vendor: vendorUserId })
+    .sort("-sold")
+    .limit(5)
+    .populate("category", "name");
 
-  // Format popular products
+  // Format popular products (category as name)
   const formattedPopularProducts = popularProducts.map((product) => ({
     id: product._id,
     name: product.name,
     price: product.price,
-    stock: product.stock,
-    status: product.status,
-    category: product.category,
+    stock: product.quantity,
+    status: product.isActive ? "active" : "inactive",
+    category: product.category?.name || "N/A",
     createdAt: product.createdAt,
   }));
 
   // Get low stock products data
   const inventoryAlerts = await Product.find({
-    vendor: vendor._id,
-    stock: { $lt: 5, $gt: 0 },
-  }).limit(5);
+    vendor: vendorUserId,
+    quantity: { $lt: 5, $gt: 0 },
+  })
+    .limit(5)
+    .populate("category", "name");
 
-  // Format inventory alerts
+  // Format inventory alerts (category as name)
   const formattedInventoryAlerts = inventoryAlerts.map((product) => ({
     id: product._id,
     name: product.name,
     price: product.price,
-    stock: product.stock,
-    status: product.status,
-    category: product.category,
+    stock: product.quantity,
+    status: product.isActive ? "active" : "inactive",
+    category: product.category?.name || "N/A",
     createdAt: product.createdAt,
   }));
 
@@ -480,6 +509,31 @@ export const getVendorStats = catchAsync(async (req, res, next) => {
   });
 });
 
+/**
+ * Get products for the authenticated vendor (vendor only)
+ */
+export const getMyProducts = catchAsync(async (req, res, next) => {
+  const vendor = await Vendor.findOne({ user: req.user.id });
+  if (!vendor) return next(new AppError("Vendor profile not found", 404));
+
+  const products = await Product.find({ vendor: vendor.user })
+    .populate("category", "name")
+    .select("name price quantity imageCover images moq createdAt category");
+
+  res.status(200).json({
+    success: true,
+    data: products.map((p) => ({
+      id: p._id,
+      name: p.name,
+      price: p.price,
+      quantity: p.quantity,
+      image: p.imageCover || p.images?.[0] || "",
+      moq: p.moq,
+      category: p.category?.name || "N/A",
+      createdAt: p.createdAt,
+    })),
+  });
+});
 /**
  * Get all vendors (admin only)
  */
@@ -516,7 +570,9 @@ export const getAllVendors = catchAsync(async (req, res, next) => {
 export const getAllInvitations = catchAsync(async (req, res, next) => {
   const invitations = await VendorInvitation.find({
     status: { $in: ["request", "pending"] },
-  }).select("name email status createdAt _id").sort("-createdAt");
+  })
+    .select("name email status createdAt _id")
+    .sort("-createdAt");
 
   res.status(200).json({
     success: true,
@@ -587,26 +643,28 @@ export const approveVendorRequest = catchAsync(async (req, res, next) => {
 
   // Find the vendor request
   const invitation = await VendorInvitation.findById(id);
-  
+
   if (!invitation) {
     return next(new AppError("Vendor request not found", 404));
   }
 
-  if (invitation.status !== 'request') {
+  if (invitation.status !== "request") {
     return next(new AppError("Only requests can be approved", 400));
   }
 
   // Check if the user is already a registered vendor
   const existingUser = await User.findOne({ email: invitation.email });
-  if (existingUser && existingUser.role === 'vendor') {
+  if (existingUser && existingUser.role === "vendor") {
     const existingVendor = await Vendor.findOne({ user: existingUser._id });
     if (existingVendor) {
-      return next(new AppError("This email is already associated with a vendor", 400));
+      return next(
+        new AppError("This email is already associated with a vendor", 400)
+      );
     }
   }
 
   // Update the invitation to pending status
-  invitation.status = 'pending';
+  invitation.status = "pending";
   invitation.issuedBy = req.user._id;
   invitation.token = VendorInvitation.generateInvitationToken();
   invitation.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -621,7 +679,11 @@ export const approveVendorRequest = catchAsync(async (req, res, next) => {
       <p>Hello ${invitation.name},</p>
       <p>Great news! Your request to become a vendor has been approved.</p>
       <p>Click the link below to complete your onboarding:</p>
-      <p><a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/vendor/onboarding?token=${invitation.token}">Complete Vendor Setup</a></p>
+      <p><a href="${
+        process.env.FRONTEND_URL || "http://localhost:3000"
+      }/vendor/onboarding?token=${
+      invitation.token
+    }">Complete Vendor Setup</a></p>
       <p>This invitation will expire in 7 days.</p>
       <p>Welcome to our marketplace!</p>
     `,
@@ -653,17 +715,26 @@ export const inviteVendor = catchAsync(async (req, res, next) => {
   const normalizedEmail = email.toLowerCase().trim();
 
   // Check if any invitation already exists for this email
-  const existingInvitation = await VendorInvitation.findOne({ email: normalizedEmail });
+  const existingInvitation = await VendorInvitation.findOne({
+    email: normalizedEmail,
+  });
   if (existingInvitation) {
-    return next(new AppError(`An invitation already exists for this email with status: ${existingInvitation.status}`, 400));
+    return next(
+      new AppError(
+        `An invitation already exists for this email with status: ${existingInvitation.status}`,
+        400
+      )
+    );
   }
 
   // Check if the user is already a registered vendor
   const existingUser = await User.findOne({ email: normalizedEmail });
-  if (existingUser && existingUser.role === 'vendor') {
+  if (existingUser && existingUser.role === "vendor") {
     const existingVendor = await Vendor.findOne({ user: existingUser._id });
     if (existingVendor) {
-      return next(new AppError("This email is already associated with a vendor", 400));
+      return next(
+        new AppError("This email is already associated with a vendor", 400)
+      );
     }
   }
 
@@ -672,7 +743,7 @@ export const inviteVendor = catchAsync(async (req, res, next) => {
     email: normalizedEmail,
     name,
     token: VendorInvitation.generateInvitationToken(),
-    status: 'pending',
+    status: "pending",
     issuedBy: req.user._id,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
@@ -686,7 +757,9 @@ export const inviteVendor = catchAsync(async (req, res, next) => {
       <p>Hello ${invitation.name},</p>
       <p>You have been invited to become a vendor on our marketplace.</p>
       <p>Click the link below to complete your onboarding:</p>
-      <p><a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/vendor/onboarding?token=${invitation.token}">Accept Invitation</a></p>
+      <p><a href="${
+        process.env.FRONTEND_URL || "http://localhost:3000"
+      }/vendor/onboarding?token=${invitation.token}">Accept Invitation</a></p>
       <p>This invitation will expire in 7 days.</p>
     `,
   });
@@ -710,28 +783,28 @@ export const inviteVendor = catchAsync(async (req, res, next) => {
 export const getVendorById = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
-  const vendor = await Vendor.findById(id).populate('user', 'name email phone');
-  
+  const vendor = await Vendor.findById(id).populate("user", "name email phone");
+
   if (!vendor) {
-    return next(new AppError('Vendor not found', 404));
+    return next(new AppError("Vendor not found", 404));
   }
 
   // Get vendor stats
   const productsCount = await Product.countDocuments({ vendor: vendor._id });
   const totalOrders = await Order.countDocuments({ vendor: vendor._id });
   const totalRevenue = await Order.aggregate([
-    { $match: { vendor: vendor._id, status: 'completed' } },
-    { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+    { $match: { vendor: vendor._id, status: "completed" } },
+    { $group: { _id: null, total: { $sum: "$totalAmount" } } },
   ]);
 
   res.status(200).json({
     success: true,
-    message: 'Vendor retrieved successfully',
+    message: "Vendor retrieved successfully",
     data: {
       id: vendor._id,
-      name: vendor.user?.name || 'N/A',
-      email: vendor.user?.email || 'N/A',
-      phone: vendor.user?.phone || 'N/A',
+      name: vendor.user?.name || "N/A",
+      email: vendor.user?.email || "N/A",
+      phone: vendor.user?.phone || "N/A",
       businessName: vendor.businessName,
       address: vendor.address,
       bio: vendor.bio,
@@ -741,7 +814,7 @@ export const getVendorById = catchAsync(async (req, res, next) => {
       totalOrders,
       totalRevenue: totalRevenue[0]?.total || 0,
       createdAt: vendor.createdAt,
-      updatedAt: vendor.updatedAt
+      updatedAt: vendor.updatedAt,
     },
   });
 });
@@ -752,18 +825,26 @@ export const getVendorById = catchAsync(async (req, res, next) => {
 export const deleteVendor = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
-  const vendor = await Vendor.findById(id).populate('user');
-  
+  const vendor = await Vendor.findById(id).populate("user");
+
   if (!vendor) {
-    return next(new AppError('Vendor not found', 404));
+    return next(new AppError("Vendor not found", 404));
   }
 
   // Check if vendor has active products or orders
   const productsCount = await Product.countDocuments({ vendor: vendor._id });
-  const ordersCount = await Order.countDocuments({ vendor: vendor._id, status: { $in: ['pending', 'processing'] } });
+  const ordersCount = await Order.countDocuments({
+    vendor: vendor._id,
+    status: { $in: ["pending", "processing"] },
+  });
 
   if (productsCount > 0 || ordersCount > 0) {
-    return next(new AppError('Cannot delete vendor with active products or pending orders. Please deactivate instead.', 400));
+    return next(
+      new AppError(
+        "Cannot delete vendor with active products or pending orders. Please deactivate instead.",
+        400
+      )
+    );
   }
 
   // Delete the vendor and associated user
@@ -774,6 +855,6 @@ export const deleteVendor = catchAsync(async (req, res, next) => {
 
   res.status(200).json({
     success: true,
-    message: 'Vendor deleted successfully',
+    message: "Vendor deleted successfully",
   });
 });

@@ -140,6 +140,14 @@ router.get(
   vendorController.getVendorStats
 );
 
+// Vendor-only: Get products for the authenticated vendor
+router.get(
+  "/my-products",
+  authenticate,
+  authorize(["vendor"]),
+  vendorController.getMyProducts
+);
+
 // Admin-only: Get all vendors
 router.get(
   "/all",

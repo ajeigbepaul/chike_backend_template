@@ -171,15 +171,56 @@ vendorSchema.statics.createFromInvitation = async function (
 };
 
 vendorSchema.methods.updateStats = async function () {
-  // Placeholder for stats update logic
-  // This would calculate productsCount, totalSales, etc. from related collections
-  const products = await mongoose
-    .model("Product")
-    .countDocuments({ vendor: this._id });
-  this.productsCount = products;
+  // Compute stats based on products linked to this vendor's user account
+  const Product = mongoose.model("Product");
+  const Order = mongoose.model("Order");
 
-  // Update other stats as needed
-  // Would fetch from Order model in a real implementation
+  // Products for this vendor: note product.vendor references User, not Vendor
+  const vendorUserId = this.user;
+  const products = await Product.find({ vendor: vendorUserId }).select("_id");
+  const productIds = products.map((p) => p._id);
+
+  this.productsCount = productIds.length;
+
+  if (productIds.length === 0) {
+    this.ordersCount = 0;
+    this.totalSales = 0;
+    this.totalRevenue = 0;
+    return this.save();
+  }
+
+  // Count orders that include at least one of this vendor's products
+  const ordersCount = await Order.countDocuments({
+    "orderItems.product": { $in: productIds },
+    status: {
+      $in: ["delivered", "completed", "processing", "in-transit", "pending"],
+    },
+  });
+  this.ordersCount = ordersCount;
+
+  // Aggregate total sales (sum of quantities) and revenue for this vendor's items
+  const revenueAgg = await Order.aggregate([
+    {
+      $match: {
+        "orderItems.product": { $in: productIds },
+        status: { $in: ["delivered", "completed"] },
+      },
+    },
+    { $unwind: "$orderItems" },
+    { $match: { "orderItems.product": { $in: productIds } } },
+    {
+      $group: {
+        _id: null,
+        totalSales: { $sum: "$orderItems.quantity" },
+        totalRevenue: {
+          $sum: { $multiply: ["$orderItems.price", "$orderItems.quantity"] },
+        },
+      },
+    },
+  ]);
+
+  this.totalSales = revenueAgg[0]?.totalSales || 0;
+  this.totalRevenue = revenueAgg[0]?.totalRevenue || 0;
 
   return this.save();
 };
