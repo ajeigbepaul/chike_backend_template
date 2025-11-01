@@ -13,6 +13,9 @@ const transporter = nodemailer.createTransport({
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
+  tls: {
+    rejectUnauthorized: false  // Add this for production servers
+  }
 });
 
 const sendEmail = async (options) => {
