@@ -8,14 +8,14 @@ const transporter = nodemailer.createTransport({
   service: EMAIL_SERVICE, // Use Gmail service
   host: EMAIL_HOST,
   port: EMAIL_PORT,
-  secure: false, // Use SSL for Gmail
+  secure: true, // Use SSL for Gmail
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
-  tls: {
-    rejectUnauthorized: false  // Add this for production servers
-  }
+  // tls: {
+  //   rejectUnauthorized: false  // Add this for production servers
+  // }
 });
 
 const sendEmail = async (options) => {
