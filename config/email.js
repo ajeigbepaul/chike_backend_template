@@ -13,12 +13,13 @@ const transporter = nodemailer.createTransport({
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
-  // tls: {
-  //   rejectUnauthorized: false  // Add this for production servers
-  // }
 });
 
 const sendEmail = async (options) => {
+  // Validate recipient email
+    if (!options.email || options.email.trim() === '') {
+      throw new Error('Recipient email is required');
+    }
   try {
     const mailOptions = {
       from: `"${EMAIL_FROM_NAME}" <${EMAIL_FROM}>`,

@@ -265,6 +265,7 @@ export const requestInvite = catchAsync(async (req, res, next) => {
   });
 
   try {
+    console.log("EMAIL_FROM:", EMAIL_FROM);
     // Send email to the admin
     await sendEmail({
       email: EMAIL_FROM || "cruiselandtravelstour@gmail.com", // Admin email
