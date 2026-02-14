@@ -40,21 +40,26 @@ const allowedOrigins = [
   "http://localhost:3000",
   "https://chike-e-frontend.vercel.app",
   "https://www.decorbuildingmaterials.com",
-  process.env.FRONTEND_URL,
+  "https://decorbuildingmaterials.com",
+  process.env.FRONTEND_URL?.replace(/\/$/, ""),
 ].filter(Boolean);
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        console.error(`CORS Error: Origin ${origin} not allowed`);
         callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   })
 );
 app.options("*", cors());
