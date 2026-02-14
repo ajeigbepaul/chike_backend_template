@@ -39,6 +39,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:3000",
   "https://chike-e-frontend.vercel.app",
+  "https://www.decorbuildingmaterials.com",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
