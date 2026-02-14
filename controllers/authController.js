@@ -57,22 +57,13 @@ export const register = catchAsync(async (req, res, next) => {
     return next(new AppError("Passwords do not match", 400));
   }
 
-  let newUser;
-  try {
-    newUser = await User.create({
-      name,
-      email,
-      password,
-      passwordConfirm,
-      phone,
-    });
-  } catch (err) {
-    // Handle duplicate email error
-    if (err.code === 11000 && err.keyPattern && err.keyPattern.email) {
-      return next(new AppError("A user with that email already exists.", 400));
-    }
-    return next(new AppError("Registration failed. Please try again.", 500));
-  }
+  const newUser = await User.create({
+    name,
+    email,
+    password,
+    passwordConfirm,
+    phone,
+  });
 
   // Generate email verification token
   const verificationToken =
