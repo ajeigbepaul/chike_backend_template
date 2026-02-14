@@ -80,3 +80,5 @@ process.on("unhandledRejection", (err) => {
 
 // Start the application
 startServer();
+
+export default app;
