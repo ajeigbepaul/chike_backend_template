@@ -38,6 +38,7 @@ const app = express();
 // Improved CORS setup to allow multiple trusted origins
 const allowedOrigins = [
   "http://localhost:3000",
+  "http://localhost:3001",
   "https://chike-e-frontend.vercel.app",
   "https://www.decorbuildingmaterials.com",
   "https://decorbuildingmaterials.com",
