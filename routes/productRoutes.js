@@ -13,6 +13,8 @@ import {
   getRelatedProducts,
   getMostOrderedProducts,
   getProductsByTag,
+  uploadAttributeSheet,
+  parseAttributeSheet,
 } from "../controllers/productController.js";
 import { authenticate, authorize } from "../middleware/auth.middleware.js";
 import reviewRouter from "./reviewRoutes.js";
@@ -36,6 +38,9 @@ router.get("/:id", getProduct);
 router.use(authenticate, authorize(["admin", "vendor"]));
 
 router.post("/", uploadProductImages, resizeProductImages, createProduct);
+
+// Parse an attribute spreadsheet into key/value pairs (does not persist)
+router.post("/parse-attributes", uploadAttributeSheet, parseAttributeSheet);
 
 router.patch("/:id", uploadProductImages, resizeProductImages, updateProduct);
 

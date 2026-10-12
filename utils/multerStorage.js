@@ -3,12 +3,16 @@ import AppError from './AppError.js';
 
 const storage = multer.memoryStorage();
 
+// Gate on the extension rather than the mimetype: browsers report .csv
+// inconsistently (text/csv, application/csv, text/plain, even
+// application/octet-stream), so mimetype alone rejects legitimate files.
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
-      file.mimetype === 'application/vnd.ms-excel') {
+  const name = (file.originalname || '').toLowerCase();
+
+  if (/\.(csv|xlsx|xls)$/.test(name)) {
     cb(null, true);
   } else {
-    cb(new AppError('Please upload only Excel files', 400), false);
+    cb(new AppError('Please upload only CSV or Excel files', 400), false);
   }
 };
 

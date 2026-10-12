@@ -4,6 +4,7 @@ import {
   getDashboardStats,
   bulkImportProducts,
   bulkExportProducts,
+  getProductImportTemplate,
   updateOrderStatus,
   bulkUpdateOrders,
   getAllUsers,
@@ -18,7 +19,8 @@ import {
   updateVendorStatus
 } from '../controllers/adminController.js';
 import { authenticate, authorize } from '../middleware/auth.middleware.js';
-import upload from '../utils/multerConfig.js';
+// Memory storage: bulk import reads req.file.buffer, which diskStorage never sets.
+import spreadsheetUpload from '../utils/multerStorage.js';
 import { validateRequest } from "../middleware/validateRequest.js";
 
 const router = express.Router();
@@ -30,8 +32,9 @@ router.use(authenticate, authorize(['admin']));
 router.get('/dashboard', getDashboardStats);
 
 // Product management routes
-router.post('/products/import', upload.single('file'), bulkImportProducts);
+router.post('/products/import', spreadsheetUpload.single('file'), bulkImportProducts);
 router.get('/products/export', bulkExportProducts);
+router.get('/products/template', getProductImportTemplate);
 
 // Order management routes
 router.patch('/orders/:id/status', updateOrderStatus);

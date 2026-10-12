@@ -7,7 +7,17 @@ import User from "../models/user.model.js";
 // import Review from "../models/Review.js";
 // import AppError from "../utils/AppError.js";
 import catchAsync from "../utils/catchAsync.js";
-import { parseExcel, generateExcel } from "../utils/excelHandler.js";
+import { parseSpreadsheet, generateExcel } from "../utils/excelHandler.js";
+import Category from "../models/category.model.js";
+import Brand from "../models/brand.model.js";
+import cloudinary from "../utils/cloudinary.js";
+import {
+  IMPORT_COLUMNS,
+  TEMPLATE_EXAMPLE_ROW,
+  rowToProduct,
+  productToRow,
+  mapWithConcurrency,
+} from "../utils/productImport.js";
 import { sendVendorInvitation } from "../services/emailService.js";
 import Order from "../models/order.model.js";
 import AppError from "../utils/AppError.js";
@@ -178,58 +188,160 @@ export const getDashboardStats = catchAsync(async (req, res, next) => {
 });
 
 // Product Management
-export const bulkImportProducts = catchAsync(async (req, res, next) => {
-  if (!req.file) {
-    return next(new AppError("Please upload an Excel file", 400));
+
+const MAX_IMPORT_ROWS = 500;
+
+// Cloudinary can fetch a remote URL itself, so we hand it the URL rather than
+// downloading first. Images already hosted on Cloudinary are passed straight
+// through, which keeps an export -> re-import round trip fast and lossless.
+const resolveImportImage = async (url) => {
+  if (!url) return null;
+  if (/res\.cloudinary\.com/.test(url)) return url;
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error("imageCover must be a public http(s) URL");
   }
 
-  const data = await parseExcel(req.file.buffer);
+  const result = await cloudinary.uploader.upload(url, {
+    folder: "chike",
+    transformation: [
+      { width: 2000, height: 1333, crop: "fill" },
+      { quality: "auto" },
+      { fetch_format: "auto" },
+    ],
+  });
+  return result.secure_url;
+};
 
-  // Validate required fields
-  const requiredFields = ["name", "price", "quantity", "category"];
-  const missingFields = requiredFields.filter(
-    (field) => !data[0] || !data[0].hasOwnProperty(field)
+export const bulkImportProducts = catchAsync(async (req, res, next) => {
+  if (!req.file) {
+    return next(new AppError("Please upload a CSV or Excel file", 400));
+  }
+
+  const rows = await parseSpreadsheet(
+    req.file.buffer,
+    req.file.mimetype || req.file.originalname
   );
 
-  if (missingFields.length > 0) {
+  if (rows.length === 0) {
+    return next(new AppError("That file has no data rows", 400));
+  }
+  if (rows.length > MAX_IMPORT_ROWS) {
     return next(
-      new AppError(`Missing required fields: ${missingFields.join(", ")}`, 400)
+      new AppError(
+        `Too many rows (${rows.length}). Please import at most ${MAX_IMPORT_ROWS} at a time.`,
+        400
+      )
     );
   }
 
-  // Transform data and insert
-  const products = data.map((item) => ({
-    name: item.name,
-    description: item.description || "",
-    price: item.price,
-    quantity: item.quantity,
-    category: item.category,
-    subCategories: item.subCategories ? item.subCategories.split(",") : [],
-    vendor: req.user.id,
-    createdAt: new Date(),
-  }));
+  // Resolve category/brand names to ids with two queries rather than one per row.
+  const [categories, brands] = await Promise.all([
+    Category.find().select("name").lean(),
+    Brand.find().select("name").lean(),
+  ]);
+  const categoryMap = new Map(
+    categories.map((c) => [String(c.name).toLowerCase(), c._id])
+  );
+  const brandMap = new Map(
+    brands.map((b) => [String(b.name).toLowerCase(), b._id])
+  );
 
-  await Product.insertMany(products);
+  const errors = [];
+  // Sheet row numbers: row 1 is the header, so data row i is sheet row i + 2.
+  const sheetRow = (i) => i + 2;
 
-  res.status(201).json({
+  const mapped = rows.map((row, i) => {
+    const { doc, errors: rowErrors } = rowToProduct(row, {
+      categoryMap,
+      brandMap,
+      vendorId: req.user.id,
+    });
+    return { index: i, doc, rowErrors };
+  });
+
+  // Only spend Cloudinary calls on rows that are otherwise valid.
+  const candidates = mapped.filter((m) => m.rowErrors.length === 0);
+  mapped
+    .filter((m) => m.rowErrors.length > 0)
+    .forEach((m) =>
+      errors.push({ row: sheetRow(m.index), message: m.rowErrors.join("; ") })
+    );
+
+  await mapWithConcurrency(candidates, 5, async (candidate) => {
+    try {
+      candidate.doc.imageCover = await resolveImportImage(
+        candidate.doc.imageCover
+      );
+    } catch (err) {
+      candidate.failed = true;
+      errors.push({
+        row: sheetRow(candidate.index),
+        message: `image could not be loaded: ${err.message}`,
+      });
+    }
+  });
+
+  // Validate against the schema before writing, so one bad row cannot abort
+  // the batch and the admin gets told exactly which row to fix.
+  const valid = [];
+  for (const candidate of candidates) {
+    if (candidate.failed) continue;
+    const product = new Product(candidate.doc);
+    try {
+      await product.validate();
+      valid.push(product);
+    } catch (err) {
+      const detail = Object.values(err.errors || {})
+        .map((e) => e.message)
+        .join("; ");
+      errors.push({
+        row: sheetRow(candidate.index),
+        message: detail || err.message,
+      });
+    }
+  }
+
+  let imported = 0;
+  if (valid.length > 0) {
+    // ordered:false so a late duplicate-key failure still commits the rest.
+    const inserted = await Product.insertMany(valid, {
+      ordered: false,
+      rawResult: true,
+    }).catch((err) => {
+      (err.writeErrors || []).forEach((we) => {
+        const candidate = candidates[we.index];
+        errors.push({
+          row: candidate ? sheetRow(candidate.index) : null,
+          message: we.errmsg || "failed to save",
+        });
+      });
+      return err.result ?? null;
+    });
+    imported = inserted?.insertedCount ?? (inserted ? valid.length : 0);
+  }
+
+  res.status(errors.length && imported === 0 ? 400 : 201).json({
     status: "success",
-    message: `${products.length} products imported successfully`,
+    data: {
+      imported,
+      failed: errors.length,
+      total: rows.length,
+      errors: errors.sort((a, b) => (a.row ?? 0) - (b.row ?? 0)),
+    },
   });
 });
 
 export const bulkExportProducts = catchAsync(async (req, res, next) => {
-  const products = await Product.find().lean();
+  const products = await Product.find()
+    .populate("category", "name")
+    .populate("brand", "name")
+    .lean();
 
-  const data = products.map((product) => ({
-    name: product.name,
-    description: product.description,
-    price: product.price,
-    quantity: product.quantity,
-    category: product.category,
-    subCategories: product.subCategories.join(","),
-    ratingsAverage: product.ratingsAverage,
-    ratingsQuantity: product.ratingsQuantity,
-  }));
+  // Emit the exact columns the importer reads, so export -> edit -> re-import
+  // round trips without losing attributes.
+  const data = products.length
+    ? products.map(productToRow)
+    : [Object.fromEntries(IMPORT_COLUMNS.map((c) => [c, ""]))];
 
   const buffer = await generateExcel(data, "Products");
 
@@ -240,6 +352,26 @@ export const bulkExportProducts = catchAsync(async (req, res, next) => {
   });
 
   res.send(buffer);
+});
+
+// A CSV starter file with the right headers and one worked example row.
+export const getProductImportTemplate = catchAsync(async (req, res, next) => {
+  const escape = (v) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const csv = [
+    IMPORT_COLUMNS.join(","),
+    IMPORT_COLUMNS.map((c) => escape(TEMPLATE_EXAMPLE_ROW[c])).join(","),
+  ].join("\n");
+
+  res.set({
+    "Content-Type": "text/csv; charset=utf-8",
+    "Content-Disposition": "attachment; filename=products_import_template.csv",
+  });
+
+  res.send(csv);
 });
 
 // Order Management

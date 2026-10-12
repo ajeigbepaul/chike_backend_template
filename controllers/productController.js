@@ -8,6 +8,8 @@ import cloudinary from "../utils/cloudinary.js";
 import Order from "../models/order.model.js";
 import { Vendor } from "../models/vendor.model.js";
 import crypto from "crypto";
+import attributeSheetUpload from "../utils/multerStorage.js";
+import { parseSpreadsheet, EXTRA_CELLS } from "../utils/excelHandler.js";
 
 // Configure multer for file uploads
 const multerStorage = multer.memoryStorage();
@@ -578,3 +580,124 @@ export const getMostOrderedProducts = async (req, res, next) => {
     data: { products: topProducts },
   });
 };
+
+// ---------------------------------------------------------------------------
+// Specification spreadsheet import
+// ---------------------------------------------------------------------------
+
+// Headers we accept for the key column and the value column, case-insensitive.
+const KEY_HEADERS = ["key", "name", "attribute", "attribute name", "spec", "specification"];
+const VALUE_HEADERS = ["value", "attribute value", "spec value", "detail"];
+
+// Scan every row, not just the first: the parser omits empty cells, so a
+// first row with a blank value would hide the value column entirely and make
+// a tall sheet look like a wide one.
+const findHeader = (rows, candidates) => {
+  for (const row of rows) {
+    const hit = Object.keys(row).find((h) =>
+      candidates.includes(h.trim().toLowerCase())
+    );
+    if (hit) return hit;
+  }
+  return undefined;
+};
+
+const str = (v) => String(v ?? "").trim();
+
+/**
+ * Turn parsed spreadsheet rows into [{key, value}] specification pairs.
+ *
+ * Accepts two layouts, because people export both:
+ *   (a) two columns headed key/value, one specification per row
+ *   (b) one wide row where each header IS a specification name
+ *
+ * Colors, sizes and features are deliberately NOT handled here - they stay
+ * manual entry in the form.
+ */
+export const rowsToSpecifications = (rows) => {
+  if (!rows.length) return [];
+
+  const first = rows[0];
+  const keyHeader = findHeader(rows, KEY_HEADERS);
+  const valueHeader = findHeader(rows, VALUE_HEADERS);
+
+  // Collected in order, merging repeated keys so "Size" is one row listing
+  // every size rather than several rows.
+  const order = [];
+  const byKey = new Map();
+
+  // "2 inch,3 inch" and "2 inch, 3 inch" must end up identical, however the
+  // values arrived - one quoted cell, spilled cells, or repeated rows.
+  const toParts = (value) =>
+    str(value)
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+  const add = (rawKey, rawValue) => {
+    const key = str(rawKey);
+    const parts = toParts(rawValue);
+    if (!key || parts.length === 0) return;
+
+    const lookup = key.toLowerCase();
+    const existing = byKey.get(lookup);
+
+    if (existing) {
+      const current = toParts(existing.value);
+      // Don't repeat a value that is already listed.
+      parts.filter((v) => !current.includes(v)).forEach((v) => current.push(v));
+      existing.value = current.join(", ");
+    } else {
+      const entry = { key, value: parts.join(", ") };
+      byKey.set(lookup, entry);
+      order.push(entry);
+    }
+  };
+
+  if (keyHeader && valueHeader) {
+    // (a) tall layout - every row is one specification
+    rows.forEach((row) => {
+      // Re-join cells that spilled past the value column on an unquoted line.
+      const spilled = row[EXTRA_CELLS] || [];
+      const value = [str(row[valueHeader]), ...spilled]
+        .filter(Boolean)
+        .join(", ");
+      add(row[keyHeader], value);
+    });
+  } else {
+    // (b) wide layout - take the first row, each column is a specification
+    Object.entries(first)
+      .filter(([key]) => key !== EXTRA_CELLS)
+      .forEach(([key, value]) => add(key, value));
+  }
+
+  return order;
+};
+
+export const uploadAttributeSheet = attributeSheetUpload.single("file");
+
+// Parses an uploaded sheet and returns the pairs. Deliberately does NOT
+// persist anything - it only fills the form client-side.
+export const parseAttributeSheet = catchAsync(async (req, res, next) => {
+  if (!req.file) {
+    return next(new AppError("Please upload a CSV or Excel file", 400));
+  }
+
+  const rows = await parseSpreadsheet(
+    req.file.buffer,
+    req.file.mimetype || req.file.originalname
+  );
+
+  const specifications = rowsToSpecifications(rows);
+
+  if (specifications.length === 0) {
+    return next(
+      new AppError(
+        "No specifications found. Expected a 'key' and 'value' column, or one row of named columns.",
+        400
+      )
+    );
+  }
+
+  res.status(200).json({ success: true, data: specifications });
+});
