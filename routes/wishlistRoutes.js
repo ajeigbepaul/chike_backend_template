@@ -4,9 +4,10 @@ import { authenticate, authorize } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
-// Only authenticated users with role 'user' can access wishlist
-router.post('/', authenticate, authorize(['user']), addToWishlist);
-router.delete('/:productId', authenticate, authorize(['user']), removeFromWishlist);
-router.get('/', authenticate, authorize(['user']), getWishlist);
+// Any signed-in account can keep a wishlist. Restricting to 'user'
+// meant admin and vendor accounts got a 403 when favouriting.
+router.post('/', authenticate, authorize(['user', 'vendor', 'admin']), addToWishlist);
+router.delete('/:productId', authenticate, authorize(['user', 'vendor', 'admin']), removeFromWishlist);
+router.get('/', authenticate, authorize(['user', 'vendor', 'admin']), getWishlist);
 
 export default router; 
