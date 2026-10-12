@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import validator from "validator";
 
 const quoteSchema = new mongoose.Schema(
   {
@@ -16,21 +17,24 @@ const quoteSchema = new mongoose.Schema(
       type: Number,
       required: [true, "Quantity is required"],
       min: [1, "Quantity must be at least 1"],
+      validate: {
+        validator: Number.isInteger,
+        message: "Quantity must be a whole number",
+      },
     },
     customerName: {
       type: String,
       required: [true, "Customer name is required"],
       trim: true,
+      maxlength: [100, "Customer name is too long"],
     },
     customerEmail: {
       type: String,
       required: [true, "Customer email is required"],
       trim: true,
       lowercase: true,
-      match: [
-        /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
-        "Please provide a valid email address",
-      ],
+      maxlength: [254, "Email is too long"],
+      validate: [validator.isEmail, "Please provide a valid email address"],
     },
     customerPhone: {
       type: String,
@@ -39,14 +43,17 @@ const quoteSchema = new mongoose.Schema(
     company: {
       type: String,
       trim: true,
+      maxlength: [100, "Company name is too long"],
     },
     message: {
       type: String,
       trim: true,
+      maxlength: [2000, "Message is too long"],
     },
     expectedPrice: {
       type: Number,
       min: [0, "Expected price must be above 0"],
+      max: [1000000000, "Expected price is too large"],
     },
     urgency: {
       type: String,
