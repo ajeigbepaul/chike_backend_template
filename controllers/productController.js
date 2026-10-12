@@ -8,6 +8,7 @@ import cloudinary from "../utils/cloudinary.js";
 import Order from "../models/order.model.js";
 import { Vendor } from "../models/vendor.model.js";
 import crypto from "crypto";
+import { resolvePublicId, destroyAssets } from "../utils/cloudinaryCleanup.js";
 import attributeSheetUpload from "../utils/multerStorage.js";
 import { parseSpreadsheet, EXTRA_CELLS } from "../utils/excelHandler.js";
 
@@ -51,11 +52,13 @@ export const resizeProductImages = catchAsync(async (req, res, next) => {
       }
     );
     req.body.imageCover = result.secure_url;
+    req.body.imageCoverPublicId = result.public_id;
   }
 
   // 2) Images
   if (req.files.images) {
     req.body.images = [];
+    req.body.imagePublicIds = [];
     await Promise.all(
       req.files.images.map(async (file) => {
         const result = await cloudinary.uploader.upload(
@@ -70,6 +73,7 @@ export const resizeProductImages = catchAsync(async (req, res, next) => {
           }
         );
         req.body.images.push(result.secure_url);
+        req.body.imagePublicIds.push(result.public_id);
       })
     );
   }
@@ -186,6 +190,28 @@ function generateSerialNumber() {
   return "Chi" + crypto.randomBytes(5).toString("hex").toUpperCase();
 }
 
+/**
+ * Cloudinary public ids for a product's images.
+ *
+ * Prefers the ids stored at upload time, falling back to parsing the
+ * secure_url for products saved before those fields existed.
+ */
+export const productImageIds = (product, { cover = true, gallery = true } = {}) => {
+  if (!product) return [];
+  const ids = [];
+
+  if (cover) {
+    ids.push(resolvePublicId(product.imageCoverPublicId, product.imageCover));
+  }
+  if (gallery) {
+    (product.images || []).forEach((url, i) =>
+      ids.push(resolvePublicId(product.imagePublicIds?.[i], url))
+    );
+  }
+
+  return ids.filter(Boolean);
+};
+
 export const createProduct = catchAsync(async (req, res, next) => {
   // Add vendor information
   if (!req.body.vendor) {
@@ -254,6 +280,15 @@ export const updateProduct = catchAsync(async (req, res, next) => {
   if (req.body.serialNumber) {
     delete req.body.serialNumber;
   }
+  // Only read the old doc when an image is actually being replaced - that is
+  // the only case with assets to clean up afterwards.
+  const replacingCover = Boolean(req.body.imageCover);
+  const replacingImages = Boolean(req.body.images);
+  const previous =
+    replacingCover || replacingImages
+      ? await Product.findById(req.params.id).lean()
+      : null;
+
   const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
     runValidators: true,
@@ -264,6 +299,16 @@ export const updateProduct = catchAsync(async (req, res, next) => {
 
   if (!product) {
     return next(new AppError("No product found with that ID", 404));
+  }
+
+  // Remove the superseded assets only once the new ones are safely saved.
+  if (previous) {
+    await destroyAssets(
+      productImageIds(previous, {
+        cover: replacingCover,
+        gallery: replacingImages,
+      })
+    );
   }
 
   // Check if the user is the vendor or admin
@@ -301,7 +346,12 @@ export const deleteProduct = catchAsync(async (req, res, next) => {
     );
   }
 
-  await product.remove();
+  // Document.remove() was removed in Mongoose 7; this project is on 8.
+  await product.deleteOne();
+
+  // Drop the remote images too, or they accumulate in Cloudinary forever.
+  // Best-effort: the database is the source of truth.
+  await destroyAssets(productImageIds(product));
 
   res.status(204).json({
     status: "success",

@@ -3,6 +3,7 @@ import multer from "multer";
 import cloudinary from "../utils/cloudinary.js";
 import AppError from "../utils/AppError.js";
 import catchAsync from "../utils/catchAsync.js";
+import { resolvePublicId, destroyAssets } from "../utils/cloudinaryCleanup.js";
 
 // Multer config for advert image
 const multerStorage = multer.memoryStorage();
@@ -35,31 +36,11 @@ export const processAdvertImage = catchAsync(async (req, res, next) => {
   next();
 });
 
-// Resolve the Cloudinary public id for an advert. Prefers the stored field, but
-// falls back to parsing the secure_url so adverts created before imagePublicId
-// existed can still have their remote asset cleaned up.
-// e.g. https://res.cloudinary.com/x/image/upload/v123/chike-adverts/abc.jpg
-//   -> chike-adverts/abc
-const resolvePublicId = (advert) => {
-  if (!advert) return null;
-  if (advert.imagePublicId) return advert.imagePublicId;
-  if (!advert.image) return null;
-
-  const match = advert.image.match(/\/upload\/(?:v\d+\/)?(.+)$/);
-  if (!match) return null;
-  return match[1].replace(/\.[^/.]+$/, "");
-};
-
-// Best-effort removal of a Cloudinary asset. The database write is the source of
-// truth, so a failure here is logged but never fails the request.
+// Adverts store only the secure_url for older records, so cleanup falls back
+// to parsing it - see utils/cloudinaryCleanup.js.
 const destroyAdvertImage = async (advert) => {
-  const publicId = resolvePublicId(advert);
-  if (!publicId) return;
-  try {
-    await cloudinary.uploader.destroy(publicId);
-  } catch (err) {
-    console.error(`Failed to delete Cloudinary asset ${publicId}:`, err.message);
-  }
+  if (!advert) return;
+  await destroyAssets([resolvePublicId(advert.imagePublicId, advert.image)]);
 };
 
 // Create a new advert

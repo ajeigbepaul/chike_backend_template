@@ -84,6 +84,14 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: [true, "A product must have a cover image"],
     },
+    // Internal: Cloudinary public ids, so replaced and deleted assets can be
+    // removed. Products saved before these existed fall back to parsing the
+    // secure_url - see utils/cloudinaryCleanup.js.
+    imageCoverPublicId: {
+      type: String,
+      default: "",
+    },
+    imagePublicIds: [String],
     colors: [String],
     sizes: [String],
     ratingsAverage: {
