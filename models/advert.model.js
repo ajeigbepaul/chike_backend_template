@@ -26,6 +26,11 @@ const advertSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    ctaRoute: {
+      type: String,
+      enum: ["/category/indoor", "/category/outdoor", "/category/construction"],
+      default: "/category/indoor",
+    },
   },
   { timestamps: true }
 );

@@ -46,7 +46,7 @@ const destroyAdvertImage = async (advert) => {
 // Create a new advert
 export const createAdvert = async (req, res) => {
   try {
-    const { title, subTitle, description, cta, image, imagePublicId } =
+    const { title, subTitle, description, cta, ctaRoute, image, imagePublicId } =
       req.body;
     if (!image) {
       return res
@@ -63,6 +63,7 @@ export const createAdvert = async (req, res) => {
       subTitle,
       description,
       cta,
+      ctaRoute,
       image,
       imagePublicId,
     });
@@ -102,7 +103,7 @@ export const updateAdvert = async (req, res) => {
     // Only update the fields actually submitted. An edit without a new file
     // leaves the existing image untouched.
     const updates = {};
-    ["title", "subTitle", "description", "cta"].forEach((field) => {
+    ["title", "subTitle", "description", "cta", "ctaRoute"].forEach((field) => {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     });
 

@@ -5,6 +5,7 @@ import AppError  from '../utils/AppError.js';
 import catchAsync from '../utils/catchAsync.js';
 import generateInvoice from '../utils/generateInvoice.js';
 import Notification from '../models/notification.model.js';
+import User from '../models/user.model.js';
 import Category from '../models/category.model.js';
 import { generateOrderId } from '../utils/generateOrderId.js';
 
@@ -67,6 +68,19 @@ export const createOrder = catchAsync(async (req, res, next) => {
 
   // 4) Save order
   const createdOrder = await order.save();
+
+  const admins = await User.find({ role: 'admin' }).select('_id');
+  if (admins.length > 0) {
+    await Notification.insertMany(
+      admins.map((admin) => ({
+        user: admin._id,
+        order: createdOrder._id,
+        type: 'order',
+        status: createdOrder.status,
+        message: `New order #${createdOrder._id} has been placed.`,
+      }))
+    );
+  }
 
   // 5) Update product quantities
   for (const item of orderItems) {
