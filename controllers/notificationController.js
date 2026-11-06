@@ -24,6 +24,11 @@ export const getUnreadCount = catchAsync(async (req, res, next) => {
       { type: "quote" },
       { quote: { $exists: true, $ne: null } },
     ];
+  } else if (req.query.type === "vendor") {
+    filter.$or = [
+      { type: "vendor" },
+      { vendor: { $exists: true, $ne: null } },
+    ];
   } else if (req.query.type) {
     filter.type = req.query.type;
   }

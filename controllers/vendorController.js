@@ -5,7 +5,8 @@ import Order from "../models/order.model.js";
 import sendEmail from "../config/email.js";
 import catchAsync from "../utils/catchAsync.js";
 import AppError from "../utils/AppError.js";
-import { EMAIL_FROM } from "../config/env.js";
+import { ADMIN_EMAIL, EMAIL_FROM, EMAIL_USER } from "../config/env.js";
+import Notification from "../models/notification.model.js";
 /**
  * Verify a vendor invitation token
  */
@@ -268,7 +269,7 @@ export const requestInvite = catchAsync(async (req, res, next) => {
     console.log("EMAIL_FROM:", EMAIL_FROM);
     // Send email to the admin
     await sendEmail({
-      email: EMAIL_FROM || "cruiselandtravelstour@gmail.com", // Admin email
+      email: ADMIN_EMAIL || EMAIL_USER || "cruiselandtravelstour@gmail.com", // Admin email
       subject: "New Vendor Invitation Request",
       html: `
         <h2>New Vendor Invitation Request</h2>
@@ -293,18 +294,32 @@ export const requestInvite = catchAsync(async (req, res, next) => {
       `,
     });
 
-    res.status(200).json({
-      success: true,
-      message:
-        "Your request has been received. Our team will contact you soon.",
-    });
   } catch (error) {
-    // Roll back the invitation request if email sending fails
-    await VendorInvitation.deleteOne({ _id: invitation._id });
-    return next(
-      new AppError(`Failed to send request notification: ${error.message}`, 500)
-    );
+    console.error("Vendor request email delivery failed:", error);
   }
+
+  try {
+    const admins = await User.find({ role: { $regex: /^admin$/i } }).select("_id");
+    if (admins.length > 0) {
+      await Notification.insertMany(
+        admins.map((admin) => ({
+          user: admin._id,
+          vendor: invitation._id,
+          type: "vendor",
+          status: "request",
+          message: `New vendor request received from ${name}.`,
+        }))
+      );
+    }
+  } catch (error) {
+    console.error("Failed to create vendor request notifications:", error);
+  }
+
+  res.status(200).json({
+    success: true,
+    message:
+      "Your request has been received. Our team will contact you soon.",
+  });
 });
 /**
  * Get vendor profile (vendor only)

@@ -4,11 +4,16 @@ import nodemailer from 'nodemailer';
 import { EMAIL_HOST,EMAIL_PASS,EMAIL_PORT,EMAIL_SERVICE,EMAIL_USER,EMAIL_FROM,EMAIL_FROM_NAME } from './env.js';
 
 
+const smtpPort = Number(EMAIL_PORT) || 587;
 const transporter = nodemailer.createTransport({
-  service: EMAIL_SERVICE, // Use Gmail service
-  host: EMAIL_HOST,
-  port: EMAIL_PORT,
-  secure: true, // Use SSL for Gmail
+  ...(EMAIL_HOST
+    ? {
+        host: EMAIL_HOST,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        requireTLS: smtpPort === 587,
+      }
+    : { service: EMAIL_SERVICE || "gmail" }),
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
@@ -29,7 +34,8 @@ const sendEmail = async (options) => {
       html: options.html,
     };
 
-    await transporter.sendMail(mailOptions);
+    const result = await transporter.sendMail(mailOptions);
+    console.info(`Email sent to ${options.email}: ${result.messageId}`);
   } catch (error) {
     console.error('Email sending error:', error);
     throw error;
