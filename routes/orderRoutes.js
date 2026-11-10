@@ -9,7 +9,6 @@ import {
   updateOrderToDelivered,
   updateOrderStatus,
   updateMyOrder,
-  updateOrderPaymentReference,
   deleteOrder,
 } from '../controllers/orderController.js';
 import { authenticate, authorize } from '../middleware/auth.middleware.js';
@@ -24,7 +23,6 @@ router.get('/my-orders', getMyOrders);
 router.get('/:id', getOrder);
 router.get('/:id/invoice', generateInvoice);
 router.patch('/:id/update', updateMyOrder); // User can update their own orders
-router.patch('/:id/payment-reference', updateOrderPaymentReference); // User can update payment reference
 router.delete('/:id', deleteOrder); // User can delete their own orders
 
 router.use(authorize(['admin']));

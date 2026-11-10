@@ -1,12 +1,26 @@
 import { Vendor, VendorInvitation } from "../models/vendor.model.js";
+import process from "node:process";
 import User from "../models/user.model.js";
 import Product from "../models/product.model.js";
 import Order from "../models/order.model.js";
 import sendEmail from "../config/email.js";
 import catchAsync from "../utils/catchAsync.js";
 import AppError from "../utils/AppError.js";
-import { ADMIN_EMAIL, EMAIL_FROM, EMAIL_USER } from "../config/env.js";
+import { ADMIN_EMAIL, EMAIL_USER } from "../config/env.js";
 import Notification from "../models/notification.model.js";
+
+const escapeHtml = (value) =>
+  String(value).replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
+
 /**
  * Verify a vendor invitation token
  */
@@ -19,6 +33,7 @@ export const verifyInvitation = catchAsync(async (req, res, next) => {
   if (!invitation) {
     return next(new AppError("Invalid or expired invitation token", 400));
   }
+  const existingUser = await User.findOne({ email: invitation.email }).select("_id");
 
   res.status(200).json({
     success: true,
@@ -26,6 +41,7 @@ export const verifyInvitation = catchAsync(async (req, res, next) => {
     data: {
       name: invitation.name,
       email: invitation.email,
+      existingAccount: !!existingUser,
     },
   });
 });
@@ -43,16 +59,29 @@ export const completeOnboarding = catchAsync(async (req, res, next) => {
     return next(new AppError("Invalid or expired invitation token", 400));
   }
 
-  // Create the user account
-  const user = await User.create({
-    name: invitation.name,
-    email: invitation.email,
-    password,
-    passwordConfirm: password, // Assuming User model has password confirmation
-    role: "vendor",
-    phone,
-    isEmailVerified: true, // Assuming User model has isVerified field
-  });
+  let user = await User.findOne({ email: invitation.email });
+  if (user) {
+    if (await Vendor.findOne({ user: user._id })) {
+      return next(new AppError("This account is already associated with a vendor", 400));
+    }
+    user.roles = [...new Set([...(user.roles || []), "vendor"])];
+    if (!user.phone && phone) user.phone = phone;
+    await user.save();
+  } else {
+    if (!password || password.length < 8) {
+      return next(new AppError("A password of at least 8 characters is required", 400));
+    }
+    user = await User.create({
+      name: invitation.name,
+      email: invitation.email,
+      password,
+      passwordConfirm: password,
+      role: "user",
+      roles: ["vendor"],
+      phone,
+      isEmailVerified: true,
+    });
+  }
 
   // Create the vendor profile
   const vendor = await Vendor.create({
@@ -95,51 +124,49 @@ export const completeOnboarding = catchAsync(async (req, res, next) => {
 });
 
 /**
- * Direct vendor onboarding (no invitation)
+ * Direct vendor onboarding for an authenticated user with an approved invitation
  */
 export const directOnboarding = catchAsync(async (req, res, next) => {
-  const { userId, password, phone, address, bio } = req.body;
+  const { userId, phone, address, bio } = req.body;
 
-  // Find user
   const user = await User.findById(userId);
   if (!user) {
     return next(new AppError("User not found", 404));
   }
 
-  // Check if user is already a vendor
-  if (user.role === "vendor") {
-    // Check if vendor profile exists
-    const existingVendor = await Vendor.findOne({ user: user._id });
-    if (existingVendor) {
-      return next(new AppError("User is already a vendor", 400));
-    }
+  if (req.user.role !== "admin" && user._id.toString() !== req.user._id.toString()) {
+    return next(new AppError("Not authorized to onboard this user", 403));
   }
 
-  // Set password if not set (or allow update)
-  if (!user.password || user.password.length < 8) {
-    user.password = password;
-    user.passwordConfirm = password;
+  const invitation = await VendorInvitation.findOne({
+    email: user.email,
+    status: "pending",
+    expiresAt: { $gt: new Date() },
+  });
+  if (!invitation) {
+    return next(
+      new AppError("Vendor onboarding requires an approved invitation", 403)
+    );
   }
-  // Set phone if not set
-  if (!user.phone) {
-    user.phone = phone;
+
+  if (await Vendor.findOne({ user: user._id })) {
+    return next(new AppError("User is already a vendor", 400));
   }
-  user.role = "vendor";
-  user.isEmailVerified = true;
+
+  user.roles = [...new Set([...(user.roles || []), "vendor"])];
+  if (!user.phone && phone) user.phone = phone;
   await user.save();
 
-  // Create vendor profile if not exists
-  let vendor = await Vendor.findOne({ user: user._id });
-  if (!vendor) {
-    vendor = await Vendor.create({
-      user: user._id,
-      status: "active",
-      address,
-      bio,
-      businessName: user.name,
-      joinedDate: new Date(),
-    });
-  }
+  const vendor = await Vendor.create({
+    user: user._id,
+    status: "active",
+    address,
+    bio,
+    businessName: user.name,
+    joinedDate: new Date(),
+  });
+  invitation.status = "accepted";
+  await invitation.save();
 
   // Send welcome email
   await sendEmail({
@@ -220,11 +247,28 @@ export const directOnboarding = catchAsync(async (req, res, next) => {
 //   });
 // });
 export const requestInvite = catchAsync(async (req, res, next) => {
-  const { email, name } = req.body;
+  const isAuthenticatedRequest = Boolean(req.user);
+  const email = isAuthenticatedRequest
+    ? req.user.email.toLowerCase()
+    : String(req.body.email || "").trim().toLowerCase();
+  const name = isAuthenticatedRequest
+    ? req.user.name
+    : String(req.body.name || "").trim();
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
 
-  // Validate input
   if (!email || !name) {
     return next(new AppError("Name and email are required", 400));
+  }
+
+  const existingUser = await User.findOne({ email });
+  if (isAuthenticatedRequest && existingUser?._id.toString() !== req.user._id.toString()) {
+    return next(new AppError("Could not verify the account for this request", 403));
+  }
+  if (!isAuthenticatedRequest && existingUser) {
+    return next(
+      new AppError("This email is already registered. Sign in to request vendor access.", 409)
+    );
   }
 
   // Check if a pending or requested invitation already exists for this email
@@ -241,40 +285,41 @@ export const requestInvite = catchAsync(async (req, res, next) => {
     );
   }
 
-  // Check if the email is already associated with a vendor
-  const existingUser = await User.findOne({ email });
-  if (existingUser && existingUser.role === "vendor") {
-    const existingVendor = await Vendor.findOne({ user: existingUser._id });
-    if (existingVendor) {
-      return next(
-        new AppError("This email is already associated with a vendor", 400)
-      );
-    }
+  const existingVendor = existingUser
+    ? await Vendor.findOne({ user: existingUser._id })
+    : null;
+  if (existingVendor) {
+    return next(new AppError("This account is already associated with a vendor", 400));
   }
 
-  // Generate a token (for tracking purposes)
-  const token = VendorInvitation.generateInvitationToken();
-
-  // Create the invitation request
-  const invitation = await VendorInvitation.create({
-    email,
-    name,
-    token,
-    status: "request", // Set status to request
-    issuedBy: null, // User-initiated request
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-  });
+  const invitation = await VendorInvitation.findOneAndUpdate(
+    { email },
+    {
+      $set: {
+        name,
+        token: VendorInvitation.generateInvitationToken(),
+        status: "request",
+        issuedBy: null,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+      runValidators: true,
+      setDefaultsOnInsert: true,
+    }
+  );
 
   try {
-    console.log("EMAIL_FROM:", EMAIL_FROM);
     // Send email to the admin
     await sendEmail({
       email: ADMIN_EMAIL || EMAIL_USER || "cruiselandtravelstour@gmail.com", // Admin email
       subject: "New Vendor Invitation Request",
       html: `
         <h2>New Vendor Invitation Request</h2>
-        <p><strong>Name:</strong> ${name}</p>
-        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Name:</strong> ${safeName}</p>
+        <p><strong>Email:</strong> ${safeEmail}</p>
         <p>Please review this request and send an invitation if appropriate.</p>
         <p><a href="${
           process.env.FRONTEND_URL || "http://localhost:3000"
@@ -288,7 +333,7 @@ export const requestInvite = catchAsync(async (req, res, next) => {
       subject: "Vendor Request Received",
       html: `
         <h2>Vendor Request Confirmation</h2>
-        <p>Hello ${name},</p>
+        <p>Hello ${safeName},</p>
         <p>We have received your request to become a vendor. Our team will review your request and contact you soon.</p>
         <p>Thank you,<br>The Marketplace Team</p>
       `,
@@ -299,7 +344,9 @@ export const requestInvite = catchAsync(async (req, res, next) => {
   }
 
   try {
-    const admins = await User.find({ role: { $regex: /^admin$/i } }).select("_id");
+    const admins = await User.find({
+      $or: [{ role: { $regex: /^admin$/i } }, { roles: "admin" }],
+    }).select("_id");
     if (admins.length > 0) {
       await Notification.insertMany(
         admins.map((admin) => ({
@@ -307,7 +354,7 @@ export const requestInvite = catchAsync(async (req, res, next) => {
           vendor: invitation._id,
           type: "vendor",
           status: "request",
-          message: `New vendor request received from ${name}.`,
+          message: `New vendor request received from ${safeName}.`,
         }))
       );
     }
@@ -616,7 +663,7 @@ export const resendInvitation = catchAsync(async (req, res, next) => {
     subject: "You are invited to become a vendor!",
     html: `
       <h2>Vendor Invitation</h2>
-      <p>Hello ${invitation.name},</p>
+      <p>Hello ${escapeHtml(invitation.name)},</p>
       <p>You have been invited to become a vendor. Click the link below to complete your onboarding:</p>
       <p><a href="${
         process.env.FRONTEND_URL || "http://localhost:3000"
@@ -652,7 +699,7 @@ export const deleteInvitation = catchAsync(async (req, res, next) => {
 });
 
 /**
- * Admin: Approve a vendor request and send invitation
+ * Admin: Approve a vendor request and either enable access or send onboarding
  */
 export const approveVendorRequest = catchAsync(async (req, res, next) => {
   const { id } = req.params;
@@ -668,52 +715,80 @@ export const approveVendorRequest = catchAsync(async (req, res, next) => {
     return next(new AppError("Only requests can be approved", 400));
   }
 
-  // Check if the user is already a registered vendor
   const existingUser = await User.findOne({ email: invitation.email });
-  if (existingUser && existingUser.role === "vendor") {
+  if (existingUser) {
     const existingVendor = await Vendor.findOne({ user: existingUser._id });
     if (existingVendor) {
-      return next(
-        new AppError("This email is already associated with a vendor", 400)
-      );
+      return next(new AppError("This account is already associated with a vendor", 400));
     }
-  }
 
-  // Update the invitation to pending status
-  invitation.status = "pending";
+    existingUser.roles = [
+      ...new Set([...(existingUser.roles || []), "vendor"]),
+    ];
+    await existingUser.save();
+
+    await Vendor.create({
+      user: existingUser._id,
+      status: "active",
+      businessName: existingUser.name,
+      joinedDate: new Date(),
+    });
+    invitation.status = "accepted";
+  } else {
+    invitation.status = "pending";
+    invitation.token = VendorInvitation.generateInvitationToken();
+    invitation.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  }
   invitation.issuedBy = req.user._id;
-  invitation.token = VendorInvitation.generateInvitationToken();
-  invitation.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await invitation.save();
 
-  // Send invitation email
-  await sendEmail({
-    email: invitation.email,
-    subject: "You are invited to become a vendor!",
-    html: `
-      <h2>Vendor Invitation Approved</h2>
-      <p>Hello ${invitation.name},</p>
-      <p>Great news! Your request to become a vendor has been approved.</p>
-      <p>Click the link below to complete your onboarding:</p>
-      <p><a href="${
-        process.env.FRONTEND_URL || "http://localhost:3000"
-      }/vendor/onboarding?token=${
-      invitation.token
-    }">Complete Vendor Setup</a></p>
-      <p>This invitation will expire in 7 days.</p>
-      <p>Welcome to our marketplace!</p>
-    `,
-  });
+  const approvalMessage = existingUser
+    ? "Vendor request approved and vendor access enabled"
+    : "Vendor request approved and onboarding invitation sent";
+  let emailSent = true;
+  try {
+    await sendEmail({
+      email: invitation.email,
+      subject: existingUser
+        ? "Your vendor request has been approved"
+        : "You are invited to become a vendor",
+      html: `
+        <h2>Vendor Request Approved</h2>
+        <p>Hello ${invitation.name},</p>
+        <p>${
+          existingUser
+            ? "Your account now has vendor access. Sign in and open the Vendor Dashboard from the account menu."
+            : "Your request has been approved. Complete vendor onboarding and create your account using the link below."
+        }</p>
+        <p><a href="${process.env.FRONTEND_URL || "http://localhost:3000"}${
+          existingUser
+            ? "/auth/signin"
+            : `/vendor/onboarding?token=${invitation.token}`
+        }">${
+          existingUser ? "Sign in to your account" : "Complete vendor onboarding"
+        }</a></p>
+        <p>Welcome to our marketplace!</p>
+      `,
+    });
+  } catch (error) {
+    emailSent = false;
+    console.error("Vendor access was enabled but approval email failed:", error);
+  }
 
   res.status(200).json({
     success: true,
-    message: "Vendor request approved and invitation sent successfully",
+    message: emailSent
+      ? approvalMessage
+      : existingUser
+      ? "Vendor access was enabled, but the approval email could not be sent"
+      : "The request was approved, but the invitation email could not be sent",
     data: {
       id: invitation._id,
       email: invitation.email,
       name: invitation.name,
       status: invitation.status,
       createdAt: invitation.createdAt,
+      emailSent,
     },
   });
 });
@@ -743,15 +818,11 @@ export const inviteVendor = catchAsync(async (req, res, next) => {
     );
   }
 
-  // Check if the user is already a registered vendor
   const existingUser = await User.findOne({ email: normalizedEmail });
-  if (existingUser && existingUser.role === "vendor") {
-    const existingVendor = await Vendor.findOne({ user: existingUser._id });
-    if (existingVendor) {
-      return next(
-        new AppError("This email is already associated with a vendor", 400)
-      );
-    }
+  if (existingUser && await Vendor.findOne({ user: existingUser._id })) {
+    return next(
+      new AppError("This email is already associated with a vendor", 400)
+    );
   }
 
   // Create new invitation

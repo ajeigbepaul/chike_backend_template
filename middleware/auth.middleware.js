@@ -44,6 +44,7 @@ const authenticate = async (req, res, next) => {
 
     // Attach user information to the request object
     req.user = user;
+    req.userRoles = [...new Set([user.role, ...(user.roles || [])])];
     next(); // Call the next middleware or route handler
   } catch (error) {
     console.error("Error in authentication middleware:", error);
@@ -84,7 +85,14 @@ const authorize = (allowedRoles = []) => {
     // console.log('User role:', req.user.role, 'Allowed roles:', allowedRoles);
 
     // If no roles are specified or user has one of the allowed roles
-    if (allowedRoles.length === 0 || allowedRoles.includes(req.user.role)) {
+    const userRoles = req.userRoles || [
+      req.user.role,
+      ...(req.user.roles || []),
+    ];
+    if (
+      allowedRoles.length === 0 ||
+      allowedRoles.some((role) => userRoles.includes(role))
+    ) {
       next();
     } else {
       return res.status(403).json({

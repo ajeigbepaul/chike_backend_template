@@ -35,6 +35,7 @@ router.post(
   [
     body("token").isString().notEmpty().withMessage("Valid token is required"),
     body("password")
+      .optional()
       .isLength({ min: 8 })
       .withMessage("Password must be at least 8 characters"),
     body("phone").notEmpty().withMessage("Phone number is required"),
@@ -48,13 +49,16 @@ router.post(
 /**
  * @route   POST /api/v1/vendors/direct-onboarding
  * @desc    Complete vendor onboarding directly by user ID
- * @access  Public
+ * @access  Authenticated user or admin
  */
 router.post(
   "/direct-onboarding",
+  authenticate,
+  authorize(["user", "admin"]),
   [
     body("userId").isString().notEmpty().withMessage("User ID is required"),
     body("password")
+      .optional()
       .isLength({ min: 8 })
       .withMessage("Password must be at least 8 characters"),
     body("phone").notEmpty().withMessage("Phone number is required"),
@@ -67,16 +71,27 @@ router.post(
 
 /**
  * @route   POST /api/v1/vendors/request-invite
- * @desc    Request a vendor invitation (public)
+ * @desc    Submit a vendor request using a name and email for an unregistered applicant
  * @access  Public
  */
 router.post(
   "/request-invite",
   [
-    body("email").isEmail().withMessage("Valid email is required"),
-    body("name").isString().notEmpty().withMessage("Name is required"),
+    body("name").trim().isLength({ min: 2, max: 100 }).withMessage("Name must be between 2 and 100 characters"),
+    body("email").trim().isEmail().withMessage("A valid email is required").normalizeEmail(),
     validateRequest,
   ],
+  vendorController.requestInvite
+);
+
+/**
+ * @route   POST /api/v1/vendors/request-invite/account
+ * @desc    Request vendor access for the authenticated account
+ * @access  Authenticated user
+ */
+router.post(
+  "/request-invite/account",
+  authenticate,
   vendorController.requestInvite
 );
 

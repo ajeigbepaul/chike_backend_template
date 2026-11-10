@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import { Buffer } from 'node:buffer';
+import process from 'node:process';
 import Order from '../models/order.model.js';
 import AppError  from '../utils/AppError.js';
 import catchAsync  from '../utils/catchAsync.js';
@@ -19,8 +21,6 @@ export const initializePayment = catchAsync(async (req, res, next) => {
     return next(new AppError('No order found with that ID', 404));
   }
 
-  console.log('Order user:', order.user, 'Request user:', req.user._id);
-
   // 2) Check if order belongs to user
   if (
     (order.user._id ? order.user._id.toString() : order.user.toString()) !== req.user._id.toString()
@@ -33,14 +33,16 @@ export const initializePayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Order is already paid', 400));
   }
 
-  // 4) Generate unique reference
+  if (!['paystack', 'flutterwave'].includes(paymentGateway)) {
+    return next(new AppError('Invalid payment gateway selected', 400));
+  }
+
   const reference = `order-${order._id}-${Date.now()}`;
+  order.paymentReference = reference;
+  await order.save();
 
-  let paymentData;
-
-  // 5) Initialize payment based on selected gateway
   if (paymentGateway === 'paystack') {
-    paymentData = await initializePaystackPayment(
+    await initializePaystackPayment(
       req.user.email,
       order.totalPrice,
       reference,
@@ -56,26 +58,20 @@ export const initializePayment = catchAsync(async (req, res, next) => {
         reference,
         email: req.user.email,
         amount: order.totalPrice,
-        publicKey:PAYSTACK_PUBLIC_KEY,
+        publicKey: PAYSTACK_PUBLIC_KEY,
       },
     });
-  } else if (paymentGateway === 'flutterwave') {
-    paymentData = await initializeFlutterwavePayment(
-      req.user.email,
-      order.totalPrice,
-      reference,
-      {
-        order_id: order._id.toString(),
-        user_id: req.user._id.toString(),
-      }
-    );
-  } else {
-    return next(new AppError('Invalid payment gateway selected', 400));
   }
 
-  // 6) Save payment reference to order
-  order.paymentReference = reference;
-  await order.save();
+  const paymentData = await initializeFlutterwavePayment(
+    req.user.email,
+    order.totalPrice,
+    reference,
+    {
+      order_id: order._id.toString(),
+      user_id: req.user._id.toString(),
+    }
+  );
 
   res.status(200).json({
     status: 'success',
@@ -99,8 +95,6 @@ export const verifyPayment = catchAsync(async (req, res, next) => {
     return next(new AppError('No order found with that payment reference', 404));
   }
 
-  console.log('Order user:', order.user, 'Request user:', req.user._id);
-
   // 2) Check if order belongs to user
   if (
     (order.user._id ? order.user._id.toString() : order.user.toString()) !== req.user._id.toString()
@@ -119,17 +113,14 @@ export const verifyPayment = catchAsync(async (req, res, next) => {
   if (paymentGateway === 'paystack') {
     verificationData = await verifyPaystackPayment(reference);
 
-    if (verificationData.data.status !== 'success') {
-      return next(new AppError('Payment not successful', 400));
-    }
   } else if (paymentGateway === 'flutterwave') {
     verificationData = await verifyFlutterwavePayment(reference);
-
-    if (verificationData.data.status !== 'successful') {
-      return next(new AppError('Payment not successful', 400));
-    }
   } else {
     return next(new AppError('Invalid payment gateway selected', 400));
+  }
+
+  if (!isPaymentValid(order, paymentGateway, verificationData.data)) {
+    return next(new AppError('Payment status, amount, currency, or reference does not match this order', 400));
   }
 
   // 5) Update order status
@@ -148,17 +139,22 @@ export const verifyPayment = catchAsync(async (req, res, next) => {
   });
 });
 
-export const webhook = catchAsync(async (req, res, next) => {
+export const webhook = catchAsync(async (req, res) => {
   let event;
 
   // Verify Paystack webhook
   if (req.headers['x-paystack-signature']) {
     const hash = crypto
       .createHmac('sha512', PAYSTACK_SECRET_KEY)
-      .update(JSON.stringify(req.body))
+      .update(req.rawBody || JSON.stringify(req.body))
       .digest('hex');
+    const expectedSignature = Buffer.from(hash);
+    const suppliedSignature = Buffer.from(req.headers['x-paystack-signature']);
 
-    if (hash !== req.headers['x-paystack-signature']) {
+    if (
+      expectedSignature.length !== suppliedSignature.length ||
+      !crypto.timingSafeEqual(expectedSignature, suppliedSignature)
+    ) {
       return res.status(400).send('Invalid signature');
     }
 
@@ -169,7 +165,13 @@ export const webhook = catchAsync(async (req, res, next) => {
     const secretHash = process.env.FLUTTERWAVE_SECRET_HASH;
     const signature = req.headers['verif-hash'];
 
-    if (signature !== secretHash) {
+    const expectedSignature = Buffer.from(secretHash || '');
+    const suppliedSignature = Buffer.from(signature);
+    if (
+      !secretHash ||
+      expectedSignature.length !== suppliedSignature.length ||
+      !crypto.timingSafeEqual(expectedSignature, suppliedSignature)
+    ) {
       return res.status(400).send('Invalid signature');
     }
 
@@ -181,7 +183,7 @@ export const webhook = catchAsync(async (req, res, next) => {
   // Handle the event
   switch (event.event) {
     // Paystack events
-    case 'charge.success':
+    case 'charge.success': {
       const paystackData = event.data;
       await handleSuccessfulPayment(
         paystackData.reference,
@@ -189,9 +191,10 @@ export const webhook = catchAsync(async (req, res, next) => {
         paystackData
       );
       break;
+    }
 
     // Flutterwave events
-    case 'charge.completed':
+    case 'charge.completed': {
       const flutterwaveData = event.data;
       if (flutterwaveData.status === 'successful') {
         await handleSuccessfulPayment(
@@ -201,6 +204,7 @@ export const webhook = catchAsync(async (req, res, next) => {
         );
       }
       break;
+    }
 
     default:
       console.log(`Unhandled event type ${event.event}`);
@@ -212,7 +216,7 @@ export const webhook = catchAsync(async (req, res, next) => {
 const handleSuccessfulPayment = async (reference, gateway, paymentData) => {
   const order = await Order.findOne({ paymentReference: reference });
 
-  if (!order || order.isPaid) return;
+  if (!order || order.isPaid || !isPaymentValid(order, gateway, paymentData)) return;
 
   order.isPaid = true;
   order.paidAt = new Date();
@@ -226,4 +230,24 @@ const handleSuccessfulPayment = async (reference, gateway, paymentData) => {
   };
 
   await order.save();
+};
+
+const isPaymentValid = (order, gateway, data) => {
+  if (!data || data.currency !== 'NGN') return false;
+  const expectedKobo = Math.round(order.totalPrice * 100);
+  if (gateway === 'paystack') {
+    return (
+      data.status === 'success' &&
+      data.reference === order.paymentReference &&
+      Number(data.amount) === expectedKobo
+    );
+  }
+  if (gateway === 'flutterwave') {
+    return (
+      data.status === 'successful' &&
+      data.tx_ref === order.paymentReference &&
+      Math.round(Number(data.amount) * 100) === expectedKobo
+    );
+  }
+  return false;
 };

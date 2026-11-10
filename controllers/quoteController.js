@@ -63,21 +63,13 @@ export const createQuoteRequest = catchAsync(async (req, res, next) => {
 
 // Get all quote requests with pagination
 export const getQuotesForUser = catchAsync(async (req, res, next) => {
-  // This is a placeholder for getting the user's email from the request.
-  // In a real application, this should be retrieved from an authenticated session.
-  const { customerEmail } = req.query;
-
-  if (!customerEmail) {
-    return next(new AppError('Customer email is required to fetch quotes.', 400));
-  }
-
-  const features = new APIFeatures(Quote.find({ customerEmail }), req.query)
-    .filter()
-    .sort()
-    .limitFields()
-    .paginate();
-
-  const quotes = await features.query;
+  const customerEmail = req.user.email;
+  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
+  const quotes = await Quote.find({ customerEmail })
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(limit);
   const total = await Quote.countDocuments({ customerEmail });
 
   res.status(200).json({
@@ -87,9 +79,9 @@ export const getQuotesForUser = catchAsync(async (req, res, next) => {
       quotes,
       pagination: {
         total,
-        page: parseInt(req.query.page) || 1,
-        limit: parseInt(req.query.limit) || 10,
-        pages: Math.ceil(total / (parseInt(req.query.limit) || 10))
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
       }
     }
   });
@@ -126,6 +118,12 @@ export const getQuote = catchAsync(async (req, res, next) => {
 
   if (!quote) {
     return next(new AppError('No quote found with that ID', 404));
+  }
+  if (
+    req.user.role !== 'admin' &&
+    quote.customerEmail.toLowerCase() !== req.user.email.toLowerCase()
+  ) {
+    return next(new AppError('Not authorized to view this quote', 403));
   }
 
   res.status(200).json({
@@ -186,10 +184,10 @@ export const updateQuoteStatus = catchAsync(async (req, res, next) => {
 // Get product quote for a specific customer
 export const getProductQuoteForCustomer = catchAsync(async (req, res, next) => {
   const { productId } = req.params;
-  const { email } = req.query;
+  const email = req.user.email;
 
-  if (!productId || !email) {
-    return next(new AppError('Please provide product ID and customer email', 400));
+  if (!productId) {
+    return next(new AppError('Please provide a product ID', 400));
   }
 
   const quote = await Quote.findOne({ productId, customerEmail: email });
@@ -205,18 +203,21 @@ export const getProductQuoteForCustomer = catchAsync(async (req, res, next) => {
 // Add a message to a quote's conversation history
 export const addQuoteMessage = catchAsync(async (req, res, next) => {
   const { id } = req.params;
-  const sender = typeof req.body.sender === 'string' ? req.body.sender.trim().toLowerCase() : '';
+  const sender = req.user.role === 'admin' ? 'admin' : 'user';
   const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return next(new AppError('Invalid quote ID', 400));
   }
-  if (!['user', 'admin'].includes(sender) || !content) {
-    return next(new AppError('A valid sender and message content are required', 400));
+  if (!content) {
+    return next(new AppError('Message content is required', 400));
   }
 
-  const quote = await Quote.findByIdAndUpdate(
-    id,
+  const quoteFilter = { _id: id };
+  if (sender !== 'admin') quoteFilter.customerEmail = req.user.email;
+
+  const quote = await Quote.findOneAndUpdate(
+    quoteFilter,
     {
       $push: {
         messages: {

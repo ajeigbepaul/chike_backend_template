@@ -71,7 +71,14 @@ if (process.env.NODE_ENV === "development") {
 }
 
 // Body parser, reading data from body into req.body
-app.use(express.json({ limit: "10kb" }));
+app.use(
+  express.json({
+    limit: "10kb",
+    verify: (req, res, buffer) => {
+      req.rawBody = buffer.toString();
+    },
+  })
+);
 // Add after express.json() middleware
 app.use((req, res, next) => {
   // Convert flat dimensions to object

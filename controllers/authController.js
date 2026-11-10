@@ -1,6 +1,8 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { promisify } from "util";
+import crypto from "crypto";
+import process from "node:process";
 // import User model
 import User from "../models/user.model.js"; // Adjust the import path as necessary
 // import User from '../models/User.js';
@@ -45,6 +47,7 @@ const createSendToken = (user, statusCode, res) => {
     token,
     data: {
       user,
+      roles: [...new Set([user.role, ...(user.roles || [])])],
     },
   });
 };
@@ -66,10 +69,7 @@ export const register = catchAsync(async (req, res, next) => {
   });
 
   // Generate email verification token
-  const verificationToken =
-    Math.random().toString(36).substring(2, 15) +
-    Math.random().toString(36).substring(2, 15);
-  console.log("Generated verification token:", verificationToken);
+  const verificationToken = crypto.randomBytes(32).toString("hex");
 
   newUser.emailVerificationToken = await bcrypt.hash(verificationToken, 12);
   newUser.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
@@ -79,7 +79,6 @@ export const register = catchAsync(async (req, res, next) => {
   const verificationUrl = `${FRONTEND_URL}/api/verify-email?token=${encodeURIComponent(
     verificationToken
   )}`;
-  console.log("Verification URL:", verificationUrl);
 
   const message = `Please verify your email by clicking on this link: ${verificationUrl}`;
   const html = `
@@ -104,7 +103,7 @@ export const register = catchAsync(async (req, res, next) => {
       message: "Verification token sent to email!",
     });
   } catch (err) {
-    console.error("Error sending verification email:", err);
+    console.error("Verification email delivery failed:", err.message);
     newUser.emailVerificationToken = undefined;
     newUser.emailVerificationExpires = undefined;
     await newUser.save({ validateBeforeSave: false });
@@ -135,12 +134,6 @@ export const login = catchAsync(async (req, res, next) => {
 
     // Check if password matches
     const isMatch = await user.correctPassword(password, user.password);
-    console.log("Password comparison:", {
-      provided: password,
-      stored: user.password,
-      isMatch,
-    });
-
     if (!isMatch) {
       return next(new AppError("Incorrect email or password", 401));
     }
@@ -164,10 +157,11 @@ export const login = catchAsync(async (req, res, next) => {
       token,
       data: {
         user,
+        roles: [...new Set([user.role, ...(user.roles || [])])],
       },
     });
   } catch (error) {
-    console.error("Login error:", error);
+    console.error("Login failed:", error.message);
     return next(new AppError("Error logging in", 500));
   }
 });
@@ -175,12 +169,10 @@ export const login = catchAsync(async (req, res, next) => {
 export const verifyEmail = catchAsync(async (req, res, next) => {
   // 1) Get user based on the token
   const verificationToken = decodeURIComponent(req.params.token);
-  console.log("Received verification token:", verificationToken);
 
   const users = await User.find({
     emailVerificationExpires: { $gt: Date.now() },
   });
-  console.log("Found users with valid expiration:", users.length);
 
   let user = null;
   for (const u of users) {
@@ -189,20 +181,17 @@ export const verifyEmail = catchAsync(async (req, res, next) => {
         verificationToken,
         u.emailVerificationToken
       );
-      console.log("Token comparison result:", isMatch);
       if (isMatch) {
         user = u;
-        console.log("Found matching user:", u.email);
         break;
       }
     } catch (err) {
-      console.error("Error comparing tokens:", err);
+      console.error("Email verification token comparison failed:", err.message);
     }
   }
 
   // 2) If token has not expired, and there is user, set the new password
   if (!user) {
-    console.log("No matching user found for token");
     return res.status(400).json({
       status: "error",
       message: "Invalid or expired verification token",
@@ -412,7 +401,8 @@ export const protect = catchAsync(async (req, res, next) => {
 
 export const restrictTo = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    const userRoles = [...new Set([req.user.role, ...(req.user.roles || [])])];
+    if (!roles.some((role) => userRoles.includes(role))) {
       return next(
         new AppError("You do not have permission to perform this action", 403)
       );

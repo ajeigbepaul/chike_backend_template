@@ -8,34 +8,82 @@ import Notification from '../models/notification.model.js';
 import User from '../models/user.model.js';
 import Category from '../models/category.model.js';
 import { generateOrderId } from '../utils/generateOrderId.js';
+import Promotion from '../models/promotion.model.js';
+import Quote from '../models/quote.model.js';
+import mongoose from 'mongoose';
+
+const VAT_RATE = 0.07;
+const SHIPPING_PRICE = 20000;
+
+const roundCurrency = (amount) => Math.round((amount + Number.EPSILON) * 100) / 100;
 
 export const createOrder = catchAsync(async (req, res, next) => {
-  const {
-    orderItems,
-    shippingAddress,
-    paymentMethod,
-    taxPrice,
-    shippingPrice,
-  } = req.body;
-
-  if (orderItems && orderItems.length === 0) {
+  const { orderItems, shippingAddress, paymentMethod, couponCode } = req.body;
+  if (!Array.isArray(orderItems) || orderItems.length === 0) {
     return next(new AppError('No order items', 400));
   }
+  if (!paymentMethod || !shippingAddress?.street) {
+    return next(new AppError('Shipping address and payment method are required', 400));
+  }
 
-  // 1) Calculate prices
-  const itemsPrice = orderItems.reduce(
-    (acc, item) => acc + item.price * item.quantity,
-    0
-  );
-  const totalPrice = itemsPrice + taxPrice + shippingPrice;
+  const productIds = orderItems.map((item) => item.product);
+  if (productIds.some((id) => !mongoose.Types.ObjectId.isValid(id))) {
+    return next(new AppError('One or more product IDs are invalid', 400));
+  }
+  const products = await Product.find({ _id: { $in: productIds } });
+  const productsById = new Map(products.map((product) => [product._id.toString(), product]));
+  const normalizedItems = [];
 
-  // 2) Check product availability
   for (const item of orderItems) {
-    const product = await Product.findById(item.product);
-    if (!product) {
-      return next(new AppError(`Product not found: ${item.product}`, 404));
+    const quantity = Number(item.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return next(new AppError('Order quantities must be whole numbers greater than zero', 400));
     }
-    if (product.quantity < item.quantity) {
+
+    const product = productsById.get(String(item.product));
+    if (!product || !product.isActive) {
+      return next(new AppError('One or more products are unavailable', 400));
+    }
+
+    let price = product.price;
+    if (item.quoteId) {
+      const quote = await Quote.findById(item.quoteId);
+      if (
+        !quote ||
+        quote.customerEmail.toLowerCase() !== req.user.email.toLowerCase() ||
+        quote.status !== 'accepted' ||
+        quote.productId.toString() !== product._id.toString() ||
+        quote.approvedQuantity !== quantity ||
+        !Number.isFinite(quote.approvedPrice) ||
+        quote.approvedPrice <= 0
+      ) {
+        return next(new AppError('The approved quote is invalid or no longer available', 400));
+      }
+      price = quote.approvedPrice;
+    } else if (quantity < product.moq) {
+      return next(
+        new AppError(`${product.name} requires a minimum quantity of ${product.moq}`, 400)
+      );
+    }
+
+    normalizedItems.push({
+      product: product._id,
+      quantity,
+      price,
+      color: item.color,
+      size: item.size,
+    });
+  }
+
+  const quantitiesByProduct = normalizedItems.reduce((totals, item) => {
+    const id = item.product.toString();
+    totals.set(id, (totals.get(id) || 0) + item.quantity);
+    return totals;
+  }, new Map());
+
+  for (const [productId, quantity] of quantitiesByProduct) {
+    const product = productsById.get(productId);
+    if (product.quantity < quantity) {
       return next(
         new AppError(
           `Not enough stock for product: ${product.name}. Only ${product.quantity} available`,
@@ -45,48 +93,124 @@ export const createOrder = catchAsync(async (req, res, next) => {
     }
   }
 
-  // Get the category of the first product for order ID generation
-  const firstProduct = await Product.findById(orderItems[0].product);
-  if (!firstProduct) {
-    return next(new AppError('Product not found', 404));
+  const itemsPrice = roundCurrency(
+    normalizedItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  );
+  const taxPrice = roundCurrency(itemsPrice * VAT_RATE);
+  let discountPrice = 0;
+  let promotion;
+  if (couponCode) {
+    const now = new Date();
+    promotion = await Promotion.findOne({
+      name: String(couponCode).trim(),
+      isActive: true,
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+    });
+    if (!promotion || promotion.applicableTo !== 'all_products') {
+      return next(new AppError('Invalid or expired coupon code', 400));
+    }
+    if (promotion.usageLimit != null && promotion.usedCount >= promotion.usageLimit) {
+      return next(new AppError('Coupon usage limit has been reached', 400));
+    }
+    if (itemsPrice < promotion.minimumOrderAmount) {
+      return next(new AppError('Order does not meet the coupon minimum amount', 400));
+    }
+    discountPrice = promotion.type === 'percentage'
+      ? roundCurrency((promotion.value / 100) * itemsPrice)
+      : Math.min(promotion.value, itemsPrice);
+  }
+  const shippingPrice = SHIPPING_PRICE;
+  const totalPrice = roundCurrency(itemsPrice + taxPrice + shippingPrice - discountPrice);
+  if (totalPrice <= 0) {
+    return next(new AppError('Order total must be greater than zero', 400));
   }
 
-  // Generate unique order ID
+  const firstProduct = productsById.get(String(orderItems[0].product));
   const orderId = await generateOrderId(firstProduct.category, Category);
-
-  // 3) Create order
   const order = new Order({
     orderId,
     user: req.user._id,
-    orderItems,
+    orderItems: normalizedItems,
     shippingAddress,
     paymentMethod,
     taxPrice,
     shippingPrice,
+    discountPrice,
     totalPrice,
   });
 
-  // 4) Save order
-  const createdOrder = await order.save();
-
-  const admins = await User.find({ role: 'admin' }).select('_id');
-  if (admins.length > 0) {
-    await Notification.insertMany(
-      admins.map((admin) => ({
-        user: admin._id,
-        order: createdOrder._id,
-        type: 'order',
-        status: createdOrder.status,
-        message: `New order #${createdOrder._id} has been placed.`,
-      }))
+  const reservedProducts = [];
+  let createdOrder;
+  let promotionUsageReserved = false;
+  try {
+    createdOrder = await order.save();
+    for (const [productId, quantity] of quantitiesByProduct) {
+      const updatedProduct = await Product.findOneAndUpdate(
+        { _id: productId, quantity: { $gte: quantity } },
+        { $inc: { quantity: -quantity, sold: quantity } },
+        { new: true }
+      );
+      if (!updatedProduct) {
+        throw new AppError('Product stock changed during checkout. Please try again.', 409);
+      }
+      reservedProducts.push({ productId, quantity });
+    }
+    if (promotion) {
+      const updatedPromotion = await Promotion.findOneAndUpdate(
+        {
+          _id: promotion._id,
+          isActive: true,
+          startDate: { $lte: new Date() },
+          endDate: { $gte: new Date() },
+          $or: [
+            { usageLimit: null },
+            { usageLimit: { $exists: false } },
+            { $expr: { $lt: ['$usedCount', '$usageLimit'] } },
+          ],
+        },
+        { $inc: { usedCount: 1 } },
+        { new: true }
+      );
+      if (!updatedPromotion) {
+        throw new AppError('Coupon usage limit has been reached or coupon expired', 400);
+      }
+      promotionUsageReserved = true;
+    }
+  } catch (error) {
+    await Promise.all(
+      reservedProducts.map(({ productId, quantity }) =>
+        Product.updateOne(
+          { _id: productId },
+          { $inc: { quantity, sold: -quantity } }
+        )
+      )
     );
+    if (promotionUsageReserved) {
+      await Promotion.updateOne(
+        { _id: promotion._id },
+        { $inc: { usedCount: -1 } }
+      );
+    }
+    if (createdOrder) await Order.deleteOne({ _id: createdOrder._id });
+    throw error;
   }
 
-  // 5) Update product quantities
-  for (const item of orderItems) {
-    await Product.findByIdAndUpdate(item.product, {
-      $inc: { quantity: -item.quantity, sold: +item.quantity },
-    });
+  try {
+    const admins = await User.find({ role: { $regex: /^admin$/i } }).select('_id');
+    if (admins.length > 0) {
+      await Notification.insertMany(
+        admins.map((admin) => ({
+          user: admin._id,
+          order: createdOrder._id,
+          type: 'order',
+          status: createdOrder.status,
+          message: `New order #${createdOrder._id} has been placed.`,
+        }))
+      );
+    }
+  } catch (error) {
+    console.error('Failed to create order notifications:', error.message);
   }
 
   res.status(201).json({
@@ -301,37 +425,6 @@ export const updateMyOrder = catchAsync(async (req, res, next) => {
   } else {
     return next(new AppError('Invalid action. Only "cancel" is allowed', 400));
   }
-});
-
-// Update order payment reference
-export const updateOrderPaymentReference = catchAsync(async (req, res, next) => {
-  const order = await Order.findById(req.params.id);
-  
-  if (!order) {
-    return next(new AppError('No order found with that ID', 404));
-  }
-  
-  // Check if user owns the order
-  if (
-    (order.user._id ? order.user._id.toString() : order.user.toString()) !== req.user._id.toString()
-  ) {
-    return next(new AppError('Not authorized to update this order', 403));
-  }
-  
-  // Only allow updating payment reference if order is not paid
-  if (order.isPaid) {
-    return next(new AppError('Cannot update payment reference for paid orders', 400));
-  }
-  
-  order.paymentReference = req.body.paymentReference;
-  await order.save();
-  
-  res.status(200).json({
-    status: 'success',
-    data: {
-      order,
-    },
-  });
 });
 
 export const deleteOrder = catchAsync(async (req, res, next) => {

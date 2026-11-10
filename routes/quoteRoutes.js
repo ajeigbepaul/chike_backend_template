@@ -1,5 +1,5 @@
 import express from 'express';
-import { body } from 'express-validator';
+import { body, param } from 'express-validator';
 import { validateRequest } from '../middleware/validateRequest.js';
 import {
   createQuoteRequest,
@@ -61,12 +61,37 @@ const quoteValidators = [
 
 // Public routes
 router.post('/', quoteValidators, createQuoteRequest);
-router.get('/', getAllQuotes);
-router.get('/user', getQuotesForUser);
-router.get('/:id', getQuote);
-router.get('/product/:productId/customer', getProductQuoteForCustomer);
-router.patch('/:id/messages', addQuoteMessage);
-// Admin-only routes
-router.patch('/:id', authenticate, authorize(['admin']), updateQuoteStatus);
+router.get('/', authenticate, authorize(['admin']), getAllQuotes);
+router.get('/user', authenticate, getQuotesForUser);
+router.get(
+  '/:id',
+  authenticate,
+  param('id').isMongoId().withMessage('A valid quote ID is required'),
+  validateRequest,
+  getQuote
+);
+router.get(
+  '/product/:productId/customer',
+  authenticate,
+  param('productId').isMongoId().withMessage('A valid product ID is required'),
+  validateRequest,
+  getProductQuoteForCustomer
+);
+router.patch(
+  '/:id/messages',
+  authenticate,
+  param('id').isMongoId().withMessage('A valid quote ID is required'),
+  body('content').trim().isLength({ min: 1, max: 2000 }),
+  validateRequest,
+  addQuoteMessage
+);
+router.patch(
+  '/:id',
+  authenticate,
+  authorize(['admin']),
+  param('id').isMongoId().withMessage('A valid quote ID is required'),
+  validateRequest,
+  updateQuoteStatus
+);
 
 export default router;

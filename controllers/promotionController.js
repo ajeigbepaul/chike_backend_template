@@ -1,6 +1,7 @@
 import Promotion from "../models/promotion.model.js";
 import catchAsync from "../utils/catchAsync.js";
 import AppError from "../utils/AppError.js";
+import Product from "../models/product.model.js";
 
 export const getAllPromotions = catchAsync(async (req, res, next) => {
   const promotions = await Promotion.find();
@@ -75,14 +76,14 @@ export const deletePromotion = catchAsync(async (req, res, next) => {
 
 export const validateCoupon = catchAsync(async (req, res, next) => {
   const { code, cartItems } = req.body;
-  if (!code || !cartItems || !Array.isArray(cartItems)) {
+  if (!code || !Array.isArray(cartItems) || cartItems.length === 0) {
     return next(new AppError("Coupon code and cart items are required", 400));
   }
 
   // Find active promotion by name (or code, if you add a code field)
   const now = new Date();
   const promotion = await Promotion.findOne({
-    name: code,
+    name: String(code).trim(),
     isActive: true,
     startDate: { $lte: now },
     endDate: { $gte: now },
@@ -91,20 +92,34 @@ export const validateCoupon = catchAsync(async (req, res, next) => {
     return next(new AppError("Invalid or expired coupon code", 400));
   }
 
-  // Determine applicable products
+  const products = await Product.find({
+    _id: { $in: cartItems.map((item) => item.product) },
+    isActive: true,
+  }).select("_id price category");
+  if (products.length !== new Set(cartItems.map((item) => String(item.product))).size) {
+    return next(new AppError("One or more products are unavailable", 400));
+  }
+  const productsById = new Map(products.map((product) => [product._id.toString(), product]));
+  for (const item of cartItems) {
+    if (!Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1) {
+      return next(new AppError("Cart quantities must be whole numbers greater than zero", 400));
+    }
+  }
+
   let applicableProductIds = [];
   if (promotion.applicableTo === "all_products") {
-    applicableProductIds = cartItems.map((item) => item.product);
+    applicableProductIds = cartItems.map((item) => String(item.product));
   } else if (promotion.applicableTo === "specific_products") {
     applicableProductIds = promotion.products.map((id) => id.toString());
   } else if (promotion.applicableTo === "specific_categories") {
-    // You may need to fetch product categories here
-    // For now, assume cartItems have a category field
     applicableProductIds = cartItems
-      .filter((item) =>
-        promotion.categories.some((catId) => catId.toString() === item.category)
-      )
-      .map((item) => item.product);
+      .filter((item) => {
+        const product = productsById.get(String(item.product));
+        return product && promotion.categories.some(
+          (categoryId) => categoryId.toString() === product.category.toString()
+        );
+      })
+      .map((item) => String(item.product));
   }
 
   // Calculate discount
@@ -113,7 +128,8 @@ export const validateCoupon = catchAsync(async (req, res, next) => {
     applicableProductIds.includes(item.product)
   );
   let totalApplicable = applicableItems.reduce(
-    (sum, item) => sum + item.price * item.quantity,
+    (sum, item) =>
+      sum + productsById.get(String(item.product)).price * Number(item.quantity),
     0
   );
 
@@ -124,6 +140,9 @@ export const validateCoupon = catchAsync(async (req, res, next) => {
       discount > promotion.maximumDiscountAmount
     ) {
       discount = promotion.maximumDiscountAmount;
+    }
+    if (promotion.usageLimit != null && promotion.usedCount >= promotion.usageLimit) {
+      return next(new AppError("Coupon usage limit has been reached", 400));
     }
   } else if (promotion.type === "fixed_amount") {
     discount = Math.min(promotion.value, totalApplicable);

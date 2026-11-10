@@ -81,7 +81,7 @@ export const initializeFlutterwavePayment = async (email, amount, reference, met
 export const verifyFlutterwavePayment = async (transactionId) => {
   try {
     const response = await axios.get(
-      `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`,
+      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${encodeURIComponent(transactionId)}`,
       {
         headers: {
           Authorization: `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}`,
